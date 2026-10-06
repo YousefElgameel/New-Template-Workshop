@@ -42,7 +42,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 1.2 — BFF conversation routes (list, create, open)
 
-- **status:** todo
+- **status:** awaiting-test
 - **depends_on:** [1.1, api:2.1]
 - **layers:** [bff]
 - **acceptance:**
@@ -52,11 +52,47 @@ conversation surface (decision 18) — the removal is item 4.1._
   - routes are wrapped in `withBff` (dynamic segment passed as `routeClass`), call `fetchUpstream`, and log route names and statuses only — never titles or message text
   - with `MOCK_UPSTREAM=true` each route serves the fixtures from 1.1; works against the fixtures until api:2.1 lands
 - **how_to_test:**
+  - `pnpm -C apps/web test` (or `just test`) — expect **18 test files, 250 tests** passed (136 before web 1.1; +13 fixtures, +101 for this item — the new ones are `src/app/api/v1/conversations/routes.test.ts` and `src/lib/conversations-bff.test.ts`, plus one in `mocks.test.ts`); api unchanged at 346
+  - `pnpm -C apps/web typecheck` and `pnpm -C apps/web build` — clean; the build lists `ƒ /api/v1/conversations` and `ƒ /api/v1/conversations/[id]`
+  - **against the mocks** (no api needed): put `MOCK_UPSTREAM=true` in `apps/web/.env.local`, run `pnpm -C apps/web dev`, then in PowerShell:
+    ```
+    Invoke-RestMethod http://localhost:3000/api/v1/conversations                       # the three fixture conversations
+    Invoke-RestMethod "http://localhost:3000/api/v1/conversations?limit=2"             # two items, count 2
+    Invoke-RestMethod http://localhost:3000/api/v1/conversations/5b1f3a52-8c1e-4d3a-9d0b-1a2b3c4d5e01   # the thread with citations
+    Invoke-RestMethod -Method Post http://localhost:3000/api/v1/conversations -ContentType application/json -Body '{"title":"hello"}'   # 201
+    ```
+  - **against the real api** (optional, writes a row to the dev database): remove `MOCK_UPSTREAM`, start the api (`uv run --directory apps/api uvicorn app.main:app --port 8000`) and repeat; the open call needs an id returned by the create call
+  - the rejections, each with no upstream call: `?limit=0` → 400; `…/conversations/not-a-uuid` → 400; a body over 4 KB → 413; `-ContentType text/plain` with a body → 415; `-Body '{"x":1}'` → 400
+  - prove the tests bite: in `src/lib/conversations-bff.ts` delete the `isUuid` check's effect, the declared-length shortcut, `redirect: 'error'`, or the error-shape guard — the matching tests fail (I did each and restored it)
+- **needs_human:**
+  - optional: the live checks above
+  - decide whether to schedule web 1.3 (below) before the pages ship
+  - reply **done** to close the item, or tell me what to change
+- **notes:**
+  - 2026-10-06 — planned.
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — implemented; awaiting test by Yousef Wahid. Files: `src/app/api/v1/conversations/route.ts` and `[id]/route.ts`, `src/lib/conversations-bff.ts`, the two test files, `src/lib/mocks.ts` (+ test: `APP_ENV` is trimmed), `apps/web/CLAUDE.md`, `docs/reference/http-api.md`, `CHANGELOG.md` + `package.json` (0.2.0). Reviews: `security-reviewer` and `code-reviewer` — no CRITICAL/HIGH; the findings below were verified before acting.
+  - 2026-10-06 — DECISIONS: the `limit` query is validated by the BFF (`400` if not 1–100) rather than silently dropped; a body over **4 KB** is `413` (the cap you left to my default); BFF-side validation answers `400 invalid_request` like the existing routes, and the api's `422` is documented as "means the two checks drifted".
+  - 2026-10-06 — fixed after review: a client that disconnects mid-upload gave a framework 500 (now `400`); a slow trickle could hold a handler open (5 s read timeout); a body without `Content-Type: application/json` is now `415` (a cross-site "simple" request could otherwise create conversations); redirects are not followed; a reply over 8 MiB, or an error body that is not the api's `{ error, trace_id }`, becomes a `502` instead of reaching the browser; the "declared length" test never set a `content-length` (a string-bodied `Request` has none), so that branch was untested — it is now, with a body that must not be read; the mock list ignored `limit`; `APP_ENV` is trimmed in the mock guard. Each new safeguard has a test that fails when the safeguard is removed.
+  - 2026-10-06 — NOT fixed here, recorded as web 1.3: the web's own request and outbound spans carry the concrete conversation id (`http.target`, `url.full`) — logs and metrics are clean. The api already scrubs it (`scrub_ids_server_hook`).
+  - 2026-10-06 — for the api roadmap (not edited from here): a lone UTF-16 surrogate in a title passes the BFF and `JSON.parse`, then fails `.encode("utf-16-le")` in the api — likely a 500; worth a `422` there.
+  - 2026-10-06 — version 0.2.0 (MINOR: new BFF routes, backward compatible).
+
+### 1.3 — Keep resource ids off the web's telemetry spans
+
+- **status:** todo
+- **depends_on:** [1.2]
+- **layers:** [bff]
+- **acceptance:**
+  - the web's inbound request span and its outbound (undici) span to the api no longer carry a concrete conversation id: any UUID in `http.target`, `http.url`, `url.path` and `url.full` is rewritten to `{id}`, as the api does with `scrub_ids_server_hook`
+  - a test shows the id on a span without the scrub (a control) and its absence with it, using an in-memory exporter; the hook is wired where the telemetry is initialised and is fail-safe (it can never break a request)
+  - `.claude/rules/60-observability.md` and `apps/web/CLAUDE.md` say so, and the "known gap" notes are removed
+- **how_to_test:**
   - _(filled in by `/implement-next`)_
 - **needs_human:**
   - none
 - **notes:**
-  - 2026-10-06 — planned.
+  - 2026-10-06 — added from the web 1.2 security review (MEDIUM). Conversations are shared and personal-data-capable (ADR-0014); an id is not a secret once the list endpoint exists, but it should not be exported to Application Insights either. Touches `src/lib/observability.ts` (the distro's http and undici instrumentation options), which is why it is its own item. Do it before the pages ship.
 
 ## Phase 2 — Conversation history (F2)
 

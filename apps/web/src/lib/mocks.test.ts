@@ -23,6 +23,14 @@ describe('mock upstream mode', () => {
     expect(isMockUpstream()).toBe(false);
   });
 
+  it('refuses mock mode in prod even when APP_ENV has stray case or whitespace', () => {
+    process.env.MOCK_UPSTREAM = 'true';
+    for (const value of ['prod', 'PROD', ' prod ', '\tProd\n']) {
+      process.env.APP_ENV = value;
+      expect(isMockUpstream(), JSON.stringify(value)).toBe(false);
+    }
+  });
+
   it('mockJson marks the response and echoes the trace id', async () => {
     const res = mockJson({ ok: true }, TRACE, 201);
     expect(res.status).toBe(201);

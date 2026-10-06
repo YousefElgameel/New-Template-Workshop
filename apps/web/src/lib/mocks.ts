@@ -17,7 +17,7 @@ export const MOCK_HEADER = 'x-mock-upstream';
 
 export function isMockUpstream(): boolean {
   if (process.env.MOCK_UPSTREAM !== 'true') return false;
-  if ((process.env.APP_ENV ?? '').toLowerCase() === 'prod') {
+  if ((process.env.APP_ENV ?? '').trim().toLowerCase() === 'prod') {
     log('error', 'MOCK_UPSTREAM ignored in prod', {});
     return false;
   }

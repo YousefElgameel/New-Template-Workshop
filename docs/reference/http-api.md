@@ -2,8 +2,10 @@
 
 The complete HTTP surface of both services as they exist today: the operational foundation
 (`/ping`, `/info`, `/health`), the first business endpoints (`/v1/conversations`), and the two demo
-BFF routes in `apps/web` that exercise the `web → api` hop. The web BFF does not mirror
-`/v1/conversations` yet (roadmap web 1.2). Derived from the route
+BFF routes in `apps/web` that exercise the `web → api` hop, plus the BFF mirror of the conversation
+endpoints (`/api/v1/conversations`). The web BFF also has the template's example `/api/v1/assistant/ask[/stream]`
+routes (single-turn, no api route behind them; replaced in roadmap web 4.1); the real ask routes arrive with web 3.1.
+Derived from the route
 source, cross-checked against the test suites (`routes.test.ts`, `test_routes.py`).
 
 `apps/api` (FastAPI) is the **only backend**; it took the `api` name in
@@ -14,17 +16,20 @@ removed in [ADR-0003](../adr/0003-remove-nestjs-api-layer.md).
 
 ## Route map
 
-| Method | Path                     | Service          | Purpose                                             | Versioned?       |
-| ------ | ------------------------ | ---------------- | --------------------------------------------------- | ---------------- |
-| GET    | `/ping`                  | `apps/api`       | Liveness greeting                                   | No (operational) |
-| GET    | `/info`                  | `apps/api`       | Status/version/runtime report                       | No (operational) |
-| GET    | `/health`                | `apps/api`       | Health + observability state                        | No (operational) |
-| POST   | `/v1/conversations`      | `apps/api`       | Start a conversation                                | Yes (`/v1`)      |
-| GET    | `/v1/conversations`      | `apps/api`       | List conversations, newest first                    | Yes (`/v1`)      |
-| GET    | `/v1/conversations/{id}` | `apps/api`       | Open a conversation with its messages               | Yes (`/v1`)      |
-| GET    | `/api/ping-backend`      | `apps/web` (BFF) | Proxies `apps/api` `/ping`                          | No (demo route)  |
-| GET    | `/api/info-backend`      | `apps/web` (BFF) | Proxies `apps/api` `/info`                          | No (demo route)  |
-| GET    | `/health`                | `apps/web` (BFF) | Own health + observability state (no upstream call) | No (operational) |
+| Method | Path                         | Service          | Purpose                                             | Versioned?       |
+| ------ | ---------------------------- | ---------------- | --------------------------------------------------- | ---------------- |
+| GET    | `/ping`                      | `apps/api`       | Liveness greeting                                   | No (operational) |
+| GET    | `/info`                      | `apps/api`       | Status/version/runtime report                       | No (operational) |
+| GET    | `/health`                    | `apps/api`       | Health + observability state                        | No (operational) |
+| POST   | `/v1/conversations`          | `apps/api`       | Start a conversation                                | Yes (`/v1`)      |
+| GET    | `/v1/conversations`          | `apps/api`       | List conversations, newest first                    | Yes (`/v1`)      |
+| GET    | `/v1/conversations/{id}`     | `apps/api`       | Open a conversation with its messages               | Yes (`/v1`)      |
+| GET    | `/api/v1/conversations`      | `apps/web` (BFF) | Proxies `GET /v1/conversations`                     | Yes (`/api/v1`)  |
+| POST   | `/api/v1/conversations`      | `apps/web` (BFF) | Proxies `POST /v1/conversations` (body ≤ 4 KB)      | Yes (`/api/v1`)  |
+| GET    | `/api/v1/conversations/[id]` | `apps/web` (BFF) | Proxies `GET /v1/conversations/{id}`                | Yes (`/api/v1`)  |
+| GET    | `/api/ping-backend`          | `apps/web` (BFF) | Proxies `apps/api` `/ping`                          | No (demo route)  |
+| GET    | `/api/info-backend`          | `apps/web` (BFF) | Proxies `apps/api` `/info`                          | No (demo route)  |
+| GET    | `/health`                    | `apps/web` (BFF) | Own health + observability state (no upstream call) | No (operational) |
 
 Business endpoints are `/v1/<feature>` on the api (routers attached to `v1_router`) and
 `/api/v1/<feature>` on web (folder-enforced). See [Versioning](#versioning).
@@ -240,7 +245,36 @@ Codes are stable identifiers the BFF and UI can switch on; messages, validation 
 traces never leave the api (rule 50). Streaming routes emit `event: error` with a bounded
 `error_kind` once the stream has started (rule 70).
 
+## `apps/web` — conversation BFF routes (`/api/v1/conversations…`)
+
+Source: `apps/web/src/app/api/v1/conversations/route.ts` and `[id]/route.ts`, helpers in
+`src/lib/conversations-bff.ts` (web roadmap 1.2). They mirror the api endpoints above: the api's status and JSON
+body come back unchanged, so a `404 not_found` or `422 validation_error` from the api reaches the browser with its
+own `{ error, trace_id }`. Every response carries `x-trace-id`; the BFF validates what it forwards, and none of it
+is logged (routes log their pattern and the status only — a rejected request logs a bounded `bff rejected request`).
+
+| Route                              | Upstream                     | The BFF answers itself when                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/conversations?limit=` | `GET /v1/conversations`      | `limit` is present and not an integer 1–100 → `400 invalid_request`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `POST /api/v1/conversations`       | `POST /v1/conversations`     | the body is over **4 KB** → `413 payload_too_large`; it cannot be read (the upload breaks off, or stalls for more than 5 s) → `400`; a body is sent without `Content-Type: application/json` → `415 unsupported_media_type`; it is not JSON, not an object, has a key other than `title`, or the title is not a string of ≤ 200 characters (UTF-16 units: 100 emoji) → `400 invalid_request`. An empty body, `null`, `{}` and `{"title":null}` mean "no title" (no content type needed when there is no body). Only `title` is forwarded. |
+| `GET /api/v1/conversations/[id]`   | `GET /v1/conversations/{id}` | `[id]` is not a UUID → `400 invalid_request` (the id goes into the upstream URL, so it is checked first)                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+- **Two codes for the same mistake.** A title that is too long, or an unknown field, is `400 invalid_request` from the
+  BFF. The api would answer `422 validation_error` — it only gets the chance if the two checks drift apart. A UI
+  needs to handle `400` for these; a `422` is a sign of a bug.
+- The size cap is enforced while reading the body (a chunked upload declares no length), because the api reads a
+  whole body before validating it. A declared `Content-Length` over the cap is refused without reading anything.
+- An api that is down, a redirect, an api reply that is not JSON, one over 8 MiB, or an **error status whose body is not
+  the api's `{ error, trace_id }` shape** (a framework default such as `{"detail": …}`) is a `502`:
+  `{ "error": "upstream_unreachable" | "upstream_error", "target": "api", "trace_id" }`.
+- With `MOCK_UPSTREAM=true` the routes serve `src/mocks/conversations.ts` (marked `x-mock-upstream: true`), behind
+  the same validation; `limit` is honoured, an unknown id is a marked `404`. Mock mode is refused when `APP_ENV` is
+  `prod` (case and surrounding whitespace ignored).
+
 ## Error behavior (BFF)
+
+> This section describes the two **demo** routes. The conversation routes above answer a reply that is not JSON with
+> `upstream_error`, not `upstream_unreachable`.
 
 Each of the two demo routes wraps its upstream `fetch` **and** its `res.json()` parse in a single
 `try/catch`. Only failures in that block — a network error (e.g. `ECONNREFUSED`, timeout) or a

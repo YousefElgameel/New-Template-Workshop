@@ -7,6 +7,24 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-06
+
+### Added
+
+- **Conversation BFF routes** (web roadmap 1.2): `GET` and `POST /api/v1/conversations` and
+  `GET /api/v1/conversations/[id]`, mirroring the api's `/v1/conversations` (api 2.1). The api's status and JSON body
+  pass through unchanged. The BFF validates what it forwards: `[id]` must be a UUID (it goes into the upstream URL),
+  `limit` is 1–100, a create body may only carry a `title` of at most 200 UTF-16 units, must be `application/json`
+  (`415` otherwise, so a cross-site "simple" request cannot create), and is capped at **4 KB** — refused with `413`
+  while it is being read (a chunked upload declares no length) and read within 5 s, because the api reads a whole
+  body before validating it. Towards the api: redirects are not followed, a reply over 8 MiB or not JSON is a `502`,
+  and an error status whose body is not the api's `{ error, trace_id }` (a framework default) is a `502` too, so
+  nothing else reaches the browser. Routes log their pattern and status only — never an id, a title or the upstream
+  URL — and label the duration metric with the route pattern. With `MOCK_UPSTREAM=true` they serve the fixtures from
+  0.1.1 (honouring `limit`). Helpers in `src/lib/conversations-bff.ts`. Nothing in the UI calls them yet (roadmap web 2.2).
+- **Mock mode ignores whitespace and case in `APP_ENV`**: `" PROD "` is refused like `prod` (`src/lib/mocks.ts`).
+  **Known gap:** the web's own spans still carry the concrete conversation id (roadmap web 1.3).
+
 ## [0.1.1] — 2026-10-06
 
 ### Added

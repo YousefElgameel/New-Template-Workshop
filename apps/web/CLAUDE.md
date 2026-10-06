@@ -25,6 +25,15 @@ URL.
   `withBff`, call upstream with `fetchUpstream`; on upstream failure return `502` with a
   `trace_id` (and `target: 'api'`) so the UI degrades gracefully.
 - `src/app/health/route.ts` — `/health`.
+- `src/app/api/v1/conversations/route.ts` (`GET` list, `POST` create) + `[id]/route.ts` (`GET` open) — the BFF
+  mirror of `/v1/conversations`. `src/lib/conversations-bff.ts` holds what they share: the UUID check for `[id]`
+  (it goes into the upstream URL), `limit` 1–100, the create-body validation (only `title`, ≤ 200 UTF-16 units,
+  `application/json` when a body is sent → else `415`), a **4 KB body cap enforced while streaming** with a 5 s read
+  timeout (`413`/`400`; the api reads a whole body before validating it), and `callApi` (api status + JSON pass
+  through; `502` for an unreachable api, a redirect, a non-JSON or over-8-MiB reply, or an error body that is not
+  the api's `{ error, trace_id }`). Routes log their PATTERN, never the URL (it holds an id); in Next 16 `params` is
+  a promise. Both modes are tested in `routes.test.ts`. **Known gap:** the web's own request/outbound spans still
+  carry the concrete id (`http.target`, `url.full`); the api scrubs it, the web does not yet (roadmap web 1.3).
 - `src/app/api/v1/assistant/ask/route.ts` + `ask/stream/route.ts` — **example business routes**
   (JSON + SSE) that proxy `${API_BASE_URL}/v1/assistant/…` or, with `MOCK_UPSTREAM=true`, serve
   `src/mocks/assistant.ts`. `src/app/chat/page.tsx` — the example chat page on them.
