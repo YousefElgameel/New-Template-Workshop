@@ -18,7 +18,7 @@ monorepo of two independent services — `apps/web` (Next.js BFF + UI) and `apps
 and **Azure Monitor / OpenTelemetry** observability in both. The browser only talks to the `web`
 BFF, which calls `api` server-side; the chain `web → api` carries one `x-trace-id`
 unchanged. **SQLAlchemy 2 async + Alembic** on **Azure SQL Database** via `mssql+aioodbc`
-(ADR-0008; conversation + message models, lazy engine, no migration written or applied yet, **never a local database**) plus an
+(ADR-0008; conversation + message models, lazy engine, first migration written, not applied, **never a local database**) plus an
 optional **read-only** second engine for an external database (unused here). Currently a working
 baseline (ping/health) with no business features and no auth — the features (chat with
 citations, conversation history, knowledge base) are planned in `roadmaps/`. The living

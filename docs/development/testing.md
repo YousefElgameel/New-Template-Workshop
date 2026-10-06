@@ -95,7 +95,9 @@ And a fourth, for anything touching the database layer: **no test connects to a 
 monkeypatch `pyodbc.connect` to raise and prove the engines, the session dependencies, and the
 lifespan never call it;
 [`test_alembic.py`](../../apps/api/tests/test_alembic.py) proves `alembic.ini` holds no URL,
-`alembic/versions/` holds no revisions, and offline `upgrade --sql` runs without a database.
+offline `upgrade --sql` runs without a database, and the history is a single linear head;
+[`test_migration_conversations.py`](../../apps/api/tests/test_migration_conversations.py) renders
+the first revision offline and proves it and the models produce identical DDL.
 
 ---
 

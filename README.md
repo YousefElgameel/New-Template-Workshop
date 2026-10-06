@@ -36,8 +36,8 @@ today**, so the roadmap is never mistaken for what's shipped.
 > cross-service **foundation** a real project builds on: the `web → api`
 > chain carrying one `x-trace-id` unchanged, Azure Monitor / OpenTelemetry
 > observability in both services, and `ping` / `health` / `info` endpoints. **No
-> business features and no auth are implemented**; the SQLAlchemy model set is an
-> empty placeholder with Alembic wired but idle, and `infra/` holds the use-case Bicep
+> business features and no auth are implemented**; the SQLAlchemy model set holds
+> only the conversation + message tables (one migration written, not applied), and `infra/` holds the use-case Bicep
 > (not yet deployed) on the cloud team's shared platform. The living architecture is
 > [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md); what the template
 > itself still needs is tracked in [`docs/template-roadmap.md`](docs/template-roadmap.md).
@@ -61,7 +61,7 @@ origin `0a71` is retired — was removed in
   pinned across `.nvmrc`, the web Dockerfile, and `engines`.
 - **Database:** SQLAlchemy 2 async (`mssql+aioodbc`) in `apps/api` against
   **Azure SQL Database** (created by the use-case Bicep deployment; **never local**). The model set
-  is an empty placeholder and Alembic is wired but idle — **no database
+  is the conversation + message tables with one migration written and not applied — **no database
   container anywhere**. An optional second engine reads an external database
   **read-only**.
 - **Observability:** OpenTelemetry → Azure Monitor + Log Analytics. Structured
@@ -416,11 +416,10 @@ Database**, with **Alembic** for migrations:
 - `app/db/external.py` — a second, **read-only** lazy engine for an external
   database (`EXTERNAL_DATABASE_URL`; `Depends(get_external_session)`); no
   Alembic, and any non-`SELECT` statement is refused before it reaches the driver.
-- `app/models/__init__.py` — the model set, **empty on purpose** (one commented
-  example model to start from).
+- `app/models/__init__.py` — the model set (`conversation.py`: `Conversation`, `Message`).
 - `alembic.ini` + `alembic/env.py` — the async Alembic environment; the URL is
   not in the ini, it comes from `DATABASE_URL` via `app.config.get_settings()`.
-  `alembic/versions/` is **empty**.
+  `alembic/versions/` holds one revision (`5228ef6b6604`), not applied to any database.
 
 `DATABASE_URL` uses the aioodbc scheme with the ODBC keywords in the query
 string —
@@ -447,9 +446,9 @@ driver) so it can be run from the container too.
 3. With a **reachable dev database**, generate a revision and review it:
    `uv run --directory apps/api alembic revision --autogenerate -m "add widget"`.
 4. Review the SQL offline (no database needed):
-   `uv run --directory apps/api alembic upgrade head --sql` — today this
-   prints only `BEGIN;`/`COMMIT;` because there are no revisions
-   (`uv run --directory apps/api alembic heads` prints nothing).
+   `uv run --directory apps/api alembic upgrade head --sql` — today it
+   renders the `conversations` + `messages` DDL
+   (`uv run --directory apps/api alembic heads` prints `5228ef6b6604 (head)`).
 5. Apply it yourself, when ready: `alembic upgrade head` against the target
    database. `uv run --directory apps/api alembic check` (needs a DB) reports
    model/migration drift.

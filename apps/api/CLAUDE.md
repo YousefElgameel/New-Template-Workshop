@@ -65,12 +65,13 @@ this as a starting map; read the actual files when you need detail.
 - `models/` — 2.0-style `Mapped[]` models subclassing `app.db.Base`: `conversation.py` holds `Conversation`
   and `Message` (`docs/design/db-design.md`; thread order = `messages.seq`, an `IDENTITY` column; use
   `Unicode()`, not `UnicodeText`, for long text — the latter renders deprecated `NTEXT` in offline DDL).
-  Import new model modules in `models/__init__.py` so Alembic sees them. **No migration exists yet**
-  (roadmap api 1.2).
+  Import new model modules in `models/__init__.py` so Alembic sees them. Its migration is `alembic/versions/20261006_1321-5228ef6b6604_create_conversations_and_messages.py`
+  (hand-written; **not applied** to any database yet — that is a human step).
 - `repositories/` — query functions taking an `AsyncSession` (`conversations.py`): ORM only, they
   flush but never commit, and never log user content.
 - `../alembic/` + `../alembic.ini` — Alembic (async `env.py`, URL from `DATABASE_URL` via
-  `app.config`, never from the ini); `versions/` is **empty** — migrations are not run.
+  `app.config`, never from the ini); `versions/` holds one revision (`5228ef6b6604`, not applied) —
+  migrations are never run by an agent.
 - `ai/` — the AI runtime (ADR-0009, rule 70): `config.py` (`AZURE_AI_*`/`AZURE_SEARCH_*`/`AI_*`),
   `client.py` (**the mock seam** — `get_chat_model()`/`get_embeddings()`, managed identity when
   deployed), `graph.py` (`build_graph()` → `retrieve → answer` LangGraph, `ask()`),
@@ -104,7 +105,8 @@ this as a starting map; read the actual files when you need detail.
 - **Session per request** via `Depends(get_session)`; tests override it with
   `app.dependency_overrides[get_session]` and never need a database. External read-only data:
   `Depends(get_external_session)` (`EXTERNAL_DATABASE_URL`; unset ⇒ `ExternalDatabaseNotConfigured`).
-- **Alembic is wired, idle.** `alembic/versions/` is empty; the URL comes from `DATABASE_URL`
+- **Alembic is wired; one revision, not applied.** `alembic/versions/` holds `5228ef6b6604` (creates
+  `conversations` + `messages`); the URL comes from `DATABASE_URL`
   through `app.config` (never `alembic.ini`). Autogenerate/`check` target the **dev** database;
   **applying is `.github/workflows/migrate.yml` (Environment-gated) or a named human** — agents
   only use offline/`heads`/`check` modes (root `CLAUDE.md` → _What you cannot do_).
@@ -120,7 +122,7 @@ uv sync
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 uv run ruff format app alembic tests && uv run ruff check app alembic tests
 uv run pytest                  # pytest + Starlette TestClient (--cov=app --cov-report=xml for coverage)
-uv run alembic heads                              # head revisions (none today)
+uv run alembic heads                              # head revision (5228ef6b6604 today)
 uv run alembic upgrade head --sql                 # offline SQL for review (no DB)
 uv run alembic revision --autogenerate -m "<msg>" # needs a reachable dev DB
 uv run alembic check                              # model/migration drift (needs a DB)

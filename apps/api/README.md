@@ -47,12 +47,13 @@ first query, so the baseline boots with the placeholder URL. Routes get a sessio
 refuses anything but `SELECT`. DB dependency spans come from the SQLAlchemy instrumentation
 registered in `app/observability.py`.
 
-Alembic is wired but idle (`alembic/versions/` is empty). Migrations are **never run by this
+Alembic is wired and holds one revision (`5228ef6b6604` — creates `conversations` and `messages`;
+not applied to any database yet). Migrations are **never run by this
 project or its agents** — applying one is the Environment-gated `migrate.yml` workflow or a
 deliberate human step:
 
 ```bash
-uv run alembic heads                              # head revisions (none today)
+uv run alembic heads                              # head revision (5228ef6b6604 today)
 uv run alembic upgrade head --sql                 # offline T-SQL for review — no DB needed
 uv run alembic revision --autogenerate -m "msg"   # needs the dev Azure SQL database reachable
 uv run alembic check                              # model/migration drift — needs the dev DB

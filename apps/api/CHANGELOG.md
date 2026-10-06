@@ -20,7 +20,11 @@ The two services version independently.
   `add_message` — bumps `updated_at`, turns the first user message into the title of a conversation
   still called "New conversation" (whitespace collapsed, 200 characters). Flushes, never commits,
   never logs content.
-- No migration yet and no endpoint: nothing changes at runtime until roadmap api 1.2 / 2.1.
+- **First migration** `5228ef6b6604` (`alembic/versions/…_create_conversations_and_messages.py`): creates
+  both tables with every constraint and index. Hand-written; `tests/test_migration_conversations.py`
+  proves offline that it and the models render identical DDL (the stand-in for `alembic check`) and that
+  the downgrade drops children first. **Not applied to any database** — applying it to dev is a human step.
+- No endpoint yet: nothing changes at runtime until roadmap api 2.1.
 
 ## [0.3.0] — 2026-10-04
 

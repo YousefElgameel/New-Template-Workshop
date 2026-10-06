@@ -195,11 +195,12 @@ Every step in order; the ones marked **human** are never taken by an agent.
 > **Team Assistant:** the template baseline described below is empty, but this project has since
 > added `Conversation` and `Message` (`apps/api/app/models/conversation.py`, design in
 > [`docs/design/db-design.md`](../design/db-design.md)) and a repository for them
-> (`app/repositories/conversations.py`). No migration has been written or applied yet.
+> (`app/repositories/conversations.py`). Its first migration (`5228ef6b6604`) is written but **not applied** to any database yet.
 
-[`apps/api/app/models/__init__.py`](../../apps/api/app/models/__init__.py) is **empty on
-purpose** — `__all__ = []` and one commented example model. `alembic/versions/` holds no
-revisions. The service boots, Alembic is wired, and nothing has been migrated.
+[`apps/api/app/models/__init__.py`](../../apps/api/app/models/__init__.py) was **empty on
+purpose** in the template baseline (`__all__ = []`, one commented example). In this project it
+holds `Conversation` and `Message`; `alembic/versions/` holds one revision (`5228ef6b6604`) that is
+**not applied** to any database yet.
 
 Growing it into a real data layer:
 
@@ -217,9 +218,9 @@ Growing it into a real data layer:
 4. **Generate a revision — against the dev database** (lifecycle step 4). Review the generated
    `upgrade()` **and** `downgrade()`; every revision ships both. The post-write hooks in
    `alembic.ini` run `ruff format` / `ruff check --fix` on the new file.
-5. **Review the SQL offline — no database needed** (step 5). Today this prints only the
-   transaction wrapper (`BEGIN TRANSACTION;` … `COMMIT;`), because there are no revisions;
-   `alembic heads` prints nothing.
+5. **Review the SQL offline — no database needed** (step 5). For the first revision this renders
+   the `conversations` + `messages` DDL inside `BEGIN TRANSACTION;` … `COMMIT;`;
+   `alembic heads` prints `5228ef6b6604 (head)`.
 6. **Apply it** — step 6.
 
 Steps 1–3 and 5 need no database. Step 4, step 6 and

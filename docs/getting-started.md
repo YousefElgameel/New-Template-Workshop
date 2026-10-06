@@ -373,11 +373,10 @@ thing to look at, not the placeholder URL. Spelling traps: the scheme is `mssql+
 Driver 18 installed on your machine only when you actually query; tests never do. Background:
 [_Database (SQLAlchemy 2 async + Alembic)_](../README.md#database-sqlalchemy-2-async--alembic).
 
-### `alembic` prints nothing / only `BEGIN TRANSACTION;` … `COMMIT;`
+### `alembic heads` prints `5228ef6b6604`, and `upgrade head --sql` renders DDL
 
-Expected. `alembic/versions/` is empty, so `uv run --directory apps/api alembic heads` has
-nothing to list and `alembic upgrade head --sql` has no SQL to render. Migrations are never run
-by this platform; see [data.md](architecture/data.md) for how a project grows the model set.
+Expected: the project's first migration (`conversations` + `messages`) exists but is **not applied**
+to any database. Migrations are never run by an agent; see [data.md](architecture/data.md) for how a project grows the model set.
 
 ---
 

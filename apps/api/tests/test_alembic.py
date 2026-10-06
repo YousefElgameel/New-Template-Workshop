@@ -1,6 +1,8 @@
-"""Alembic is wired but idle (ADR-0004 / ADR-0008): no hard-coded URL, no revisions,
-and the async ``env.py`` runs in OFFLINE mode with no database and no connection
-— rendering for the SQL Server dialect.
+"""Alembic wiring (ADR-0004 / ADR-0008): no hard-coded URL, and the async ``env.py`` runs in
+OFFLINE mode with no database and no connection — rendering for the SQL Server dialect.
+
+The revision itself (``create conversations and messages``) is covered by
+``tests/test_migration_conversations.py``.
 """
 
 from __future__ import annotations
@@ -57,10 +59,14 @@ def test_script_location_resolves_to_the_alembic_dir() -> None:
     assert (SERVICE_ROOT / "alembic" / "script.py.mako").is_file()
 
 
-def test_versions_dir_exists_and_holds_no_revisions() -> None:
+def test_versions_dir_holds_a_single_linear_history() -> None:
     assert VERSIONS.is_dir()
-    assert [p.name for p in VERSIONS.iterdir() if p.suffix == ".py"] == []
-    assert ScriptDirectory.from_config(_config()).get_heads() == []
+    script = ScriptDirectory.from_config(_config())
+    # One head: a second head means two branches were created and nobody merged them.
+    assert len(script.get_heads()) == 1
+    revisions = list(script.walk_revisions())
+    files = [p for p in VERSIONS.glob("*.py") if p.name != "__init__.py"]
+    assert len(revisions) == len(files)
 
 
 def test_env_py_reads_url_from_settings_and_targets_base_metadata() -> None:
@@ -87,8 +93,8 @@ def test_offline_upgrade_runs_without_a_database(monkeypatch: pytest.MonkeyPatch
     command.upgrade(_config(output), "head", sql=True)  # `alembic upgrade head --sql`
 
     assert attempts == []
-    # No revisions -> no DDL is emitted; only the transaction wrapper may appear.
-    # The SQL Server dialect renders it as BEGIN TRANSACTION / COMMIT (+ GO
-    # batch separators); nothing else is acceptable.
-    emitted = [line.strip().rstrip(";") for line in output.getvalue().splitlines() if line.strip()]
-    assert all(line in ("BEGIN TRANSACTION", "BEGIN", "COMMIT", "GO") for line in emitted), emitted
+    # The revision's DDL is asserted in test_migration_conversations.py; here only that it
+    # rendered T-SQL (wrapped in a transaction) without a connection.
+    sql = output.getvalue()
+    assert "BEGIN TRANSACTION" in sql and "COMMIT" in sql
+    assert "CREATE TABLE" in sql  # the revisions' DDL, asserted per revision elsewhere

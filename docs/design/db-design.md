@@ -50,7 +50,7 @@ erDiagram
 | `created_at` | `datetime2(3)`     | no   | now     |                                                                             |
 | `updated_at` | `datetime2(3)`     | no   | now     | the list is sorted by it; bumped whenever a message is stored (decision 11) |
 
-- **Indexes:** PK; `updated_at` descending (for the newest-first list) — to confirm at migration time.
+- **Indexes:** PK; `updated_at` descending (for the newest-first list) (created by migration `5228ef6b6604`).
 - **Foreign keys:** none.
 - **PII / retention:** titles can echo a user's first question; kept indefinitely, no purge job.
 - **Expected volume:** low (internal team) — not yet estimated.
@@ -76,7 +76,7 @@ erDiagram
 
 ## Migration notes
 
-- No migration has been authored or applied. The first revision creates both tables; the
-  `migration-author` agent autogenerates against the **dev** database and the migration pipeline
-  (or a named human) applies it.
+- The first revision (`5228ef6b6604`, hand-written, roadmap api 1.2) creates both tables and
+  both indexes; it is **not applied** to any database yet — the migration pipeline or a named
+  human applies it, then runs `alembic check` against dev.
 - Nothing outside Alembic is needed (no extensions, roles or seed data).
