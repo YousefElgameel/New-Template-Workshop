@@ -7,6 +7,29 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-06
+
+### Added
+
+- **The `/chat` page** (web roadmap 2.2, `src/components/chat/ChatWorkspace.tsx`): conversations on the left, the open
+  thread on the right, the input at the bottom. On load it fetches `GET /api/v1/conversations` (after mount, so times
+  are in the browser's time zone) and shows the list or "No chats yet". **+ New chat** creates a conversation, puts it
+  first, selects it and focuses the input; clicking a row opens it with its messages and their citations (`docs/…`
+  paths, each once). The list and the thread each show a loading state and, when the BFF fails, an error line with the
+  error code and the `trace_id` (a **Retry** button for the list). Opening a conversation while another is loading keeps
+  the latest click; **+ New chat** pressed twice creates one conversation. Below 768 px the list is a drawer opened by
+  a **Show conversations** button. Works against `MOCK_UPSTREAM=true`. Sending a message is not wired yet (web 3.3): the
+  input keeps what was typed and says so. "No chats yet" is shown only once the list has loaded.
+- **`src/lib/conversations-client.ts`**: the browser-side client for the three conversation routes. It never throws; a
+  failure carries the error code and the `trace_id` (from the body, else the `x-trace-id` header), and a 200 reply
+  missing the field the page needs is `invalid_response` rather than an endless spinner.
+- The home page links to `/chat`. `MessageInput` accepts an optional `textareaRef`.
+
+### Changed
+
+- `/chat` no longer shows the template's single-turn demo (`ChatPanel` on `/api/v1/assistant/ask/stream`); the component
+  and its BFF routes stay until web 4.1.
+
 ## [0.2.1] — 2026-10-06
 
 ### Added

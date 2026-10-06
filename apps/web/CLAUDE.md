@@ -36,8 +36,13 @@ URL.
   carry the concrete id (`http.target`, `url.full`); the api scrubs it, the web does not yet (roadmap web 1.3).
 - `src/app/api/v1/assistant/ask/route.ts` + `ask/stream/route.ts` — **example business routes**
   (JSON + SSE) that proxy `${API_BASE_URL}/v1/assistant/…` or, with `MOCK_UPSTREAM=true`, serve
-  `src/mocks/assistant.ts`. `src/app/chat/page.tsx` — the example chat page on them.
-- `src/components/chat/` — `ChatThread`, `MessageInput`, `ChatPanel`, and `ConversationList` (Tailwind, RTL-tested).
+  `src/mocks/assistant.ts` (the template's single-turn demo; removed in roadmap web 4.1).
+  `src/app/chat/page.tsx` — the chat page: a thin shell around `ChatWorkspace`, which talks to the
+  conversation routes (`/api/v1/conversations…`) through `src/lib/conversations-client.ts`.
+- `src/components/chat/` — `ChatThread`, `MessageInput`, `ChatPanel`, `ConversationList` and `ChatWorkspace` (Tailwind, RTL-tested).
+  `ChatWorkspace` is the `/chat` page body: it owns the state and fetches (list after mount, open a
+  conversation — latest click wins —, **+ New chat**, a drawer for the list below 768 px) and sends
+  nothing yet (web 3.3). `MessageInput` takes an optional `textareaRef` (focus) and `keepText`; `ConversationList` takes `showEmpty`.
   `ConversationList` is the chat page's sidebar: a **+ New chat** button and one `<button>` row per conversation
   (title + `formatRelativeTime` from `src/lib/relative-time.ts`: "today 10:12" / "yesterday" / "5 Oct"), the open row marked
   `aria-current="true"`, long titles truncated, "No chats yet" when empty. Presentational: `onSelect(id)` / `onNewChat()`

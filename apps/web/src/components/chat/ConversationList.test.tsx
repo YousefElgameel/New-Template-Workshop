@@ -113,6 +113,12 @@ describe('<ConversationList />', () => {
     expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
+  it('hides the empty line while the page is still loading, but keeps + New chat', () => {
+    setup({ conversations: [], showEmpty: false });
+    expect(screen.queryByTestId('conversations-empty')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '+ New chat' })).toBeInTheDocument();
+  });
+
   it('truncates a long title without widening the column, and keeps the full text as a tooltip', () => {
     const long = 'A very long question about trace propagation across the whole stack '
       .repeat(8)

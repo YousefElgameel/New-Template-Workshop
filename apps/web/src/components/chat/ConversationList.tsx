@@ -14,6 +14,8 @@ interface Props {
   now?: Date;
   /** IANA zone for the times. Defaults to the browser's — see the hydration note below. */
   timeZone?: string;
+  /** Show "No chats yet" when the list is empty. The page turns it off while the list is loading or failed. */
+  showEmpty?: boolean;
 }
 
 /**
@@ -41,6 +43,7 @@ export function ConversationList({
   onNewChat,
   now,
   timeZone,
+  showEmpty = true,
 }: Readonly<Props>) {
   const clock = now ?? new Date();
   return (
@@ -59,12 +62,14 @@ export function ConversationList({
       </div>
 
       {conversations.length === 0 ? (
-        <p
-          className="text-sm text-neutral-600 dark:text-neutral-400"
-          data-testid="conversations-empty"
-        >
-          No chats yet
-        </p>
+        showEmpty && (
+          <p
+            className="text-sm text-neutral-600 dark:text-neutral-400"
+            data-testid="conversations-empty"
+          >
+            No chats yet
+          </p>
+        )
       ) : (
         // `p-1`: a scroll container clips on both axes, so without room around the rows the 2px
         // focus ring (plus its 2px offset) would be cut off at the edges.

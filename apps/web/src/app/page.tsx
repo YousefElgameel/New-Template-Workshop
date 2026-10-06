@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 
 interface PanelState {
@@ -98,6 +99,9 @@ export default function Home() {
   return (
     <main>
       <h1>Team Assistant</h1>
+      <p>
+        <Link href="/chat">Open the chat</Link>
+      </p>
       <p>
         Each button calls a same-origin Next route handler (the BFF). The BFF calls the api backend
         server-side and forwards the same <code>x-trace-id</code> across the hop. The{' '}

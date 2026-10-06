@@ -1,11 +1,15 @@
 'use client';
 
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useState, type FormEvent, type KeyboardEvent, type Ref } from 'react';
 
 interface Props {
   onSubmit: (text: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  /** Lets the page move focus here (e.g. after **+ New chat**). */
+  textareaRef?: Ref<HTMLTextAreaElement>;
+  /** Leave the typed text in place after Send (while the page cannot send it yet). */
+  keepText?: boolean;
 }
 
 /** Textarea + send button. Enter sends, Shift+Enter inserts a newline. */
@@ -13,6 +17,8 @@ export function MessageInput({
   onSubmit,
   disabled = false,
   placeholder = 'Ask a question…',
+  textareaRef,
+  keepText = false,
 }: Props) {
   const [text, setText] = useState('');
   const canSend = !disabled && text.trim().length > 0;
@@ -21,7 +27,7 @@ export function MessageInput({
     e?.preventDefault();
     if (!canSend) return;
     onSubmit(text.trim());
-    setText('');
+    if (!keepText) setText('');
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -34,6 +40,7 @@ export function MessageInput({
   return (
     <form onSubmit={submit} className="flex items-end gap-2" aria-label="Message form">
       <textarea
+        ref={textareaRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}

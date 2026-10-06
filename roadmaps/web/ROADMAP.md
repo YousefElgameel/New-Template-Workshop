@@ -127,7 +127,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 2.2 — `/chat` page: list, new chat, reopen
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [1.2, 2.1]
 - **layers:** [ui]
 - **acceptance:**
@@ -139,12 +139,21 @@ conversation surface (decision 18) — the removal is item 4.1._
   - the home page links to `/chat`
   - works against `MOCK_UPSTREAM=true` fixtures until api:2.1 lands
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `cd apps/web && pnpm test` → all green (322 tests; `ChatWorkspace.test.tsx`, `conversations-client.test.ts` are the new ones)
+  - `cd apps/web && MOCK_UPSTREAM=true pnpm dev`, open http://localhost:3000 → click **Open the chat** → `/chat`
+  - the list shows 3 conversations (newest first, "today 10:12" style times); click **Error contract** → two messages, the answer with `[1] docs/reference/http-api.md`
+  - **+ New chat** → "New conversation" appears at the top, selected, the cursor is in the input; typing and Enter keeps the text and says sending is not available yet (3.3)
+  - narrow the window below 768 px → the list is hidden; **Show conversations** opens it as a drawer, choosing a row closes it
+  - errors: set `MOCK_UPSTREAM=false` with no api running, reload `/chat` → red line "Could not load conversations (upstream_unreachable). Trace ID: …" and **Retry**; the same id is in the web's log line
 - **needs_human:**
-  - compare the page with `docs/design/wireframes/chat.html` in a browser (desktop and a narrow window) and say what to adjust
+  - compare the page with `docs/design/wireframes/chat.html` in a browser (desktop and a narrow window) and say what to adjust (the page height is `100dvh - 7rem`, tuned by eye; the sidebar is a plain overlay, not animated)
 - **notes:**
   - 2026-10-06 — planned. Sending a message is added in 3.3.
   - 2026-10-06 — from the 2.1 review, constraints on this page: (1) fetch the list **after mount** — `ConversationList` shows times in the browser's time zone, so rows must not be in server-rendered markup (a server/browser text mismatch otherwise); (2) the page must bound the sidebar's **width** (truncation needs it) and **height** (the list scrolls inside a parent with a fixed height, `min-h-0`); (3) the page needs an `h1` — the list brings an `h2`; (4) "today/yesterday" does not roll over at midnight without a re-render.
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — implemented by Claude. Files: `ChatWorkspace` (+test), `conversations-client` (+test), `chat/page.tsx`, home link, `MessageInput` (`textareaRef`, `keepText`), `ConversationList` (`showEmpty`), CHANGELOG/CLAUDE.md, web 0.3.0. Reviews: code-reviewer (7 findings; 1–6 fixed with tests and mutation checks: empty state while loading, typed text kept, focus after choosing a row, wrong-shape 200 replies, new-chat vs open ordering, stale create error). Not needed: security review (no new route, env or outbound call).
+  - 2026-10-06 — deferred: "today/yesterday" does not roll over at midnight without a re-render (from the 2.1 review); the page has no timer. Drawer has no Escape-to-close or focus trap. A first-paint server-render test for the list is not added (the list is empty until mount by construction).
+  - 2026-10-06 — confirmed by Yousef Wahid.
 
 ## Phase 3 — Chat with citations (F1)
 
