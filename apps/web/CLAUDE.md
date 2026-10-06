@@ -32,6 +32,12 @@ URL.
 - `src/lib/stream.ts` (`streamUpstream`/`proxyStream`), `src/lib/sse.ts` (frame parser/builder),
   `src/lib/chat-client.ts` (`askStream`, browser → BFF), `src/lib/mocks.ts`
   (`isMockUpstream`/`mockJson`/`mockSse`), `src/lib/api-types.ts` (**generated** — `make openapi`).
+- `src/lib/conversation-types.ts` — the conversation contract (`/api/v1/conversations…`): create/list/open
+  types **derived from the generated `api-types`**; the ask response and the stream frames (`sources`/`token`/`done`/
+  `error`) are **hand-declared** (`TODO(contract)`) until api 4.2/4.3 exist. `src/mocks/conversations.ts` — the
+  fixtures typed from it: an empty list, three listed conversations, a detail for each (long, short, empty), a created
+  conversation, a JSON answer, a streamed answer and a streamed failure (`error` frame); pass the frame arrays to
+  `mockSse`. `src/mocks/conversations.test.ts` keeps them honest (ordering, limits, frame order).
 - `src/lib/trace.ts` — `withBff` (adopt/generate `x-trace-id`, run inside the `AsyncLocalStorage`
   store, echo the header on the response, record the request-duration metric — pass
   `{ routeClass }` for dynamic segments), `fetchUpstream` (the ONLY sanctioned HTTP client:

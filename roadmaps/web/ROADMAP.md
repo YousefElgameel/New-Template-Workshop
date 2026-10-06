@@ -15,7 +15,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 1.1 — Conversation types and mock fixtures
 
-- **status:** todo
+- **status:** done
 - **depends_on:** []
 - **layers:** [bff]
 - **acceptance:**
@@ -23,11 +23,22 @@ conversation surface (decision 18) — the removal is item 4.1._
   - fixtures (in `src/mocks/`) for: an empty list, a list of three conversations, one conversation with messages that carry citations, a created conversation, a JSON answer, a streamed answer, and a streamed failure (`error` frame)
   - the mock helpers can pace SSE frames as the existing `mockSse` does
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm -C apps/web test` (or `just test`) — expect **16 test files, 149 tests** passed in web (15 files / 136 tests before, plus `src/mocks/conversations.test.ts`: 13); api unchanged at 346
+  - `pnpm -C apps/web typecheck` — clean. The type-check is half of the test: the fixtures are typed from the generated contract, so a backend change that breaks them fails here
+  - prove it: delete `truncated: false,` from one entry in `conversationDetails` (`src/mocks/conversations.ts`) → `tsc` reports a TS2418 error; put it back. And in the same file make a detail's `updated_at` earlier than its last message → 2 tests fail. (I did both and restored the file.)
+  - read the fixtures: `src/mocks/conversations.ts` — an empty list, three conversations newest first, a detail for each (long, short, empty), a created conversation, a JSON answer, a streamed answer and a streamed failure
+  - nothing uses them at runtime yet; `pnpm -C apps/web build` still compiles
 - **needs_human:**
-  - none
+  - none for this item. Reply **done** to close it.
 - **notes:**
   - 2026-10-06 — planned.
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — implemented; awaiting test by Yousef Wahid. Files: `src/lib/conversation-types.ts`, `src/mocks/conversations.ts` and `conversations.test.ts` (new), `apps/web/CLAUDE.md`, `src/mocks/README.md`, `CHANGELOG.md` + `package.json` (0.1.1). Review: `code-reviewer` (no security review: no route, env or boundary change), no blockers; its findings were fixed.
+  - 2026-10-06 — DEVIATION from the acceptance text, on purpose: it says the shapes are "hand-declared for now". The create/list/open types are instead **derived from the generated `api-types.ts`** (api 2.1 is done), as rule 30 requires ("type from openapi, never by hand"), so a backend change breaks the type-check. Only the ask response and the stream frames — which the api does not serve yet — are hand-declared (`TODO(contract)`, swapped in 4.2).
+  - 2026-10-06 — fixed after review: `updated_at` now equals the last message's `created_at` (the api bumps it on every append; my first fixtures had it earlier); citations are `docs/…` paths (the assistant indexes only `docs/**/*.md`; mine were `README.md`/`.claude/…`, which the api could never return); the failure frame's `count` is derived from the citations; the test no longer pins `truncated` to false. Both new rules are covered by tests that fail when broken.
+  - 2026-10-06 — open questions for the api roadmap, not changed here: `SourcesFrame.count` is carried over from the template's frame but api 4.3 does not list it; `ErrorFrame.error_kind` is a plain `string` until the api fixes its kinds (`apps/api/app/ai/telemetry.py`). No `truncated: true` fixture was added (not required); one is cheap if the "older messages omitted" UI needs it.
+  - 2026-10-06 — version 0.1.1 (PATCH: nothing changes at runtime).
+  - 2026-10-06 — confirmed by Yousef Wahid; closed.
 
 ### 1.2 — BFF conversation routes (list, create, open)
 

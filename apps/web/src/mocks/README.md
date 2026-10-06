@@ -3,7 +3,7 @@
 The frontend developer builds against **fixtures** until the api endpoint exists, then deletes
 the mock branch. The rules:
 
-- One module per feature (`assistant.ts`, `<feature>.ts`) exporting plain data (JSON fixtures)
+- One module per feature (`assistant.ts`, `conversations.ts`, `<feature>.ts`) exporting plain data (JSON fixtures)
   and, for streaming routes, an array of SSE frames built with `sseFrame()`.
 - **Type every fixture against the contract**: import the generated types from
   `@/lib/api-types` (`docs/reference/openapi.json` → `make openapi`). If the endpoint is not in
@@ -13,5 +13,7 @@ the mock branch. The rules:
   call stays in the same handler, so removing the mock is a one-line deletion.
 - Mock mode is **server-side** (`MOCK_UPSTREAM=true` in `apps/web/.env.local`), never exposed
   to the browser, refused in `prod`, and every mocked response carries `x-mock-upstream: true`.
+- A fixture module may ship a `*.test.ts` that checks the rules a type cannot (ordering, limits, frame
+  order) — see `conversations.test.ts`.
 - Fixtures are excluded from coverage; the routes that use them are tested in both modes
   (`routes.test.ts` next to the route).
