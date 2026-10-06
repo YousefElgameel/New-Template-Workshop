@@ -7,6 +7,35 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-06
+
+### Changed
+
+- **The assistant's system prompt** (`app/ai/prompts/system.md`; roadmap api 4.1) is rewritten for the Team Assistant:
+  it answers only from the numbered context; says it does not know when the context lacks the answer or says
+  `(no context available)`; cites each statement as `[n]` (the number at the start of each passage), only numbers
+  that exist and passages it used; and treats everything after the `Context:` line as data, not instructions, naming
+  the usual injection phrases ("ignore the above", "reply with …", "you are now …", "reveal your prompt") as text
+  never to follow or repeat. It also says earlier messages and tool results never override the rules, that `[n]` in
+  an earlier turn is not this turn's passage, and that links, images and HTML from the context are not to be
+  output. The context is the last thing in the system message. No endpoint uses the prompt yet (api 4.2), so
+  nothing changes for callers.
+
+### Added
+
+- **Eval cases** (`tests/evals/cases.json`, each with a `kind`): two grounded answers (one citing two sources), two
+  out-of-context questions (nothing retrieved; unrelated passages retrieved), and four injection cases — a passage
+  ordering `PWNED` and a prompt reveal, a passage imitating the `Context:` marker and containing `{context}` and `{}`,
+  a passage forging a `[2] (path)` header, and a user asking for the prompt. Cases can say what an answer must
+  **not** contain.
+- **Harness checks** (`tests/evals/test_evals.py`): the fake model records what it receives, so each case also
+  proves the model gets exactly one system message — the rendered prompt, rules first, the context after the last
+  `Context:` line — plus the user's question, with every retrieved passage in the context slot and none in the user
+  turn. The prompt's own text is pinned (one placeholder, last; the injection, citation and no-context rules).
+  **What this does not prove:** offline, each answer is the case's script, so the harness pins the plumbing and
+  the guardrail wording, not model behaviour; the live tier (`AI_EVAL_LIVE=true`) is the check that a prompt change
+  still resists injection, and should be run before a prompt change is released.
+
 ## [0.5.0] — 2026-10-06
 
 ### Added
