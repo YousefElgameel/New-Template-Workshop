@@ -7,6 +7,23 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-06
+
+### Added
+
+- **`ConversationList` component** (web roadmap 2.1, `src/components/chat/ConversationList.tsx`): the chat page's sidebar —
+  a **+ New chat** button and one row per conversation with its title and when it was last active, the open row
+  marked `aria-current="true"` (announced by screen readers; the selected row keeps its tint on hover), long titles cut
+  with an ellipsis (the full text is a tooltip on the text, so a screen reader does not hear the title twice), a focus ring
+  that is not clipped by the scrolling list, "No chats yet" when there are none. Every row is a real `<button>`, so Tab, Enter and Space work. It is
+  presentational: `onSelect(id)` and `onNewChat()` are callbacks and it never fetches. Titles render as text, never
+  as markup.
+- **`formatRelativeTime`** (`src/lib/relative-time.ts`): "today 10:12", "yesterday", "5 Oct", "5 Oct 2025" — by calendar
+  day in a given (or the browser's) time zone, DST-safe, with fixed three-letter month names (`en-GB` would write
+  "Sept") and cached formatters, and an unreadable timestamp yields an empty string instead of
+  an error.
+  No page uses them yet (roadmap web 2.2): nothing changes at runtime, hence a PATCH.
+
 ## [0.2.0] — 2026-10-06
 
 ### Added

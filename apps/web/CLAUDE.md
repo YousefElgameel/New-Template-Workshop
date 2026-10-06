@@ -37,7 +37,13 @@ URL.
 - `src/app/api/v1/assistant/ask/route.ts` + `ask/stream/route.ts` — **example business routes**
   (JSON + SSE) that proxy `${API_BASE_URL}/v1/assistant/…` or, with `MOCK_UPSTREAM=true`, serve
   `src/mocks/assistant.ts`. `src/app/chat/page.tsx` — the example chat page on them.
-- `src/components/chat/` — `ChatThread`, `MessageInput`, `ChatPanel` (Tailwind, RTL-tested).
+- `src/components/chat/` — `ChatThread`, `MessageInput`, `ChatPanel`, and `ConversationList` (Tailwind, RTL-tested).
+  `ConversationList` is the chat page's sidebar: a **+ New chat** button and one `<button>` row per conversation
+  (title + `formatRelativeTime` from `src/lib/relative-time.ts`: "today 10:12" / "yesterday" / "5 Oct"), the open row marked
+  `aria-current="true"`, long titles truncated, "No chats yet" when empty. Presentational: `onSelect(id)` / `onNewChat()`
+  are callbacks, it never fetches. Times are read in the browser's time zone, which the server does not know, so the rows must not be in
+  server-rendered markup: fetch the list after mount so the first render has none. The page also has to bound the column's
+  width (for truncation) and height (for the list to scroll).
 - `src/lib/stream.ts` (`streamUpstream`/`proxyStream`), `src/lib/sse.ts` (frame parser/builder),
   `src/lib/chat-client.ts` (`askStream`, browser → BFF), `src/lib/mocks.ts`
   (`isMockUpstream`/`mockJson`/`mockSse`), `src/lib/api-types.ts` (**generated** — `make openapi`).

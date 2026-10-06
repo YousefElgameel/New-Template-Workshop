@@ -42,7 +42,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 1.2 — BFF conversation routes (list, create, open)
 
-- **status:** awaiting-test
+- **status:** done
 - **depends_on:** [1.1, api:2.1]
 - **layers:** [bff]
 - **acceptance:**
@@ -77,6 +77,7 @@ conversation surface (decision 18) — the removal is item 4.1._
   - 2026-10-06 — NOT fixed here, recorded as web 1.3: the web's own request and outbound spans carry the concrete conversation id (`http.target`, `url.full`) — logs and metrics are clean. The api already scrubs it (`scrub_ids_server_hook`).
   - 2026-10-06 — for the api roadmap (not edited from here): a lone UTF-16 surrogate in a title passes the BFF and `JSON.parse`, then fails `.encode("utf-16-le")` in the api — likely a 500; worth a `422` there.
   - 2026-10-06 — version 0.2.0 (MINOR: new BFF routes, backward compatible).
+  - 2026-10-06 — confirmed by Yousef Wahid; closed.
 
 ### 1.3 — Keep resource ids off the web's telemetry spans
 
@@ -98,7 +99,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 2.1 — ConversationList component
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [1.1]
 - **layers:** [ui]
 - **acceptance:**
@@ -108,11 +109,21 @@ conversation surface (decision 18) — the removal is item 4.1._
   - long titles are truncated without breaking the layout
   - styled with Tailwind v4 like the other chat components
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm -C apps/web test` (or `just test`) — expect **20 test files, 283 tests** passed (250 before; +33 in `src/components/chat/ConversationList.test.tsx` and `src/lib/relative-time.test.ts`); api unchanged at 346
+  - `pnpm -C apps/web typecheck` and `pnpm -C apps/web build` — clean
+  - the component is not on a page yet (that is 2.2), so there is nothing to click. To look at it now, temporarily render `<ConversationList conversations={conversationListFixture.items} selectedId={conversationIds.errors} onSelect={console.log} onNewChat={() => undefined} />` (fixtures in `src/mocks/conversations.ts`) in a scratch page and check: three rows with a time under each title, the second row highlighted with a blue left border, Tab reaching **+ New chat** then each row, Enter/Space selecting, a long title cut with an ellipsis, and the focus ring fully visible. Remove the scratch page afterwards
+  - prove the tests bite: in `ConversationList.tsx` remove `aria-current`, the `truncate` class, the `p-1` padding or the selected row's `hover:bg-blue-100`; in `relative-time.ts` change `days === 1` or `Sep` → `Sept` — the matching test fails each time (I did all of these and restored them)
 - **needs_human:**
-  - none
+  - optional: look at it in a browser once 2.2 puts it on `/chat` (contrast, spacing and the focus ring cannot be checked in jsdom)
+  - reply **done** to close the item, or tell me what to change
 - **notes:**
   - 2026-10-06 — planned.
+  - 2026-10-06 — started by Claude. Picked by the skill's rule: 1.3 comes first in phase order but depends on 1.2, which is still `awaiting-test`; 2.1 needs only 1.1.
+  - 2026-10-06 — implemented; awaiting test by Yousef Wahid. Files: `src/components/chat/ConversationList.tsx` + `.test.tsx`, `src/lib/relative-time.ts` + `.test.ts` (new), `apps/web/CLAUDE.md`, `CHANGELOG.md` + `package.json` (0.2.1). Review: `code-reviewer` (no security review: no route, env or boundary change), no blockers; its findings were verified, then fixed.
+  - 2026-10-06 — fixed after review: the focus ring was clipped by the scrolling list (`overflow-y-auto` clips both axes → `p-1`); the title was announced twice (a `title` on the button becomes its accessible description → the tooltip now sits on the text); hovering the selected row dropped its tint; time text and the empty state were under 4.5:1 contrast; en-GB writes September as "Sept" (verified) → fixed three-letter month names; the three overlapping "Conversations" labels are now one; the time is a `<time dateTime>`; formatters are cached; the "defaults now" test uses fake timers instead of a loose regex.
+  - 2026-10-06 — what jsdom cannot prove (no layout, no screen reader): truncation, the focus ring and the contrast are pinned by class assertions only. Real checks are the browser look above and the manual Playwright smoke (web 4.3). The accessible name in a real browser separates title and time; jsdom concatenates them.
+  - 2026-10-06 — version 0.2.1 (PATCH: nothing uses the component yet, so nothing changes at runtime).
+  - 2026-10-06 — confirmed by Yousef Wahid; closed.
 
 ### 2.2 — `/chat` page: list, new chat, reopen
 
@@ -133,6 +144,7 @@ conversation surface (decision 18) — the removal is item 4.1._
   - compare the page with `docs/design/wireframes/chat.html` in a browser (desktop and a narrow window) and say what to adjust
 - **notes:**
   - 2026-10-06 — planned. Sending a message is added in 3.3.
+  - 2026-10-06 — from the 2.1 review, constraints on this page: (1) fetch the list **after mount** — `ConversationList` shows times in the browser's time zone, so rows must not be in server-rendered markup (a server/browser text mismatch otherwise); (2) the page must bound the sidebar's **width** (truncation needs it) and **height** (the list scrolls inside a parent with a fixed height, `min-h-0`); (3) the page needs an `h1` — the list brings an `h2`; (4) "today/yesterday" does not roll over at midnight without a re-render.
 
 ## Phase 3 — Chat with citations (F1)
 
