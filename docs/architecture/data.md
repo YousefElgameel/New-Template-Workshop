@@ -192,6 +192,11 @@ Every step in order; the ones marked **human** are never taken by an agent.
 
 ## The placeholder model set, and how to extend it
 
+> **Team Assistant:** the template baseline described below is empty, but this project has since
+> added `Conversation` and `Message` (`apps/api/app/models/conversation.py`, design in
+> [`docs/design/db-design.md`](../design/db-design.md)) and a repository for them
+> (`app/repositories/conversations.py`). No migration has been written or applied yet.
+
 [`apps/api/app/models/__init__.py`](../../apps/api/app/models/__init__.py) is **empty on
 purpose** — `__all__ = []` and one commented example model. `alembic/versions/` holds no
 revisions. The service boots, Alembic is wired, and nothing has been migrated.

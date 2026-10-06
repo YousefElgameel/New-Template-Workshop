@@ -7,6 +7,21 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-06
+
+### Added
+
+- **Conversation and message models** (`app/models/conversation.py`): `conversations` and `messages`
+  per `docs/design/db-design.md` — UUID keys, `DATETIME2(3)` UTC timestamps, a `role` check, a JSON
+  check on `citations`, and `messages.seq` (`BIGINT IDENTITY`, unique) as the thread order. Long text
+  uses `Unicode()` so offline DDL says `NVARCHAR(max)`, never the deprecated `NTEXT`.
+- **Conversation repository** (`app/repositories/conversations.py`): create, list newest-first (limit
+  1–100), open with the thread ordered by `seq`, the last N messages for model history, and
+  `add_message` — bumps `updated_at`, turns the first user message into the title of a conversation
+  still called "New conversation" (whitespace collapsed, 200 characters). Flushes, never commits,
+  never logs content.
+- No migration yet and no endpoint: nothing changes at runtime until roadmap api 1.2 / 2.1.
+
 ## [0.3.0] — 2026-10-04
 
 ### Added
