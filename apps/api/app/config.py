@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+from sqlalchemy.engine import make_url
 
 # apps/api/.env — the local-dev env file (copy of .env.example). Optional.
 LOCAL_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
@@ -54,6 +55,28 @@ DEFAULT_DATABASE_URL = (
     "mssql+aioodbc://USER:PASSWORD@your-server.database.windows.net:1433/your-database"
     "?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no"
 )
+
+
+# The host in DEFAULT_DATABASE_URL — seeing it means DATABASE_URL was never configured.
+PLACEHOLDER_DATABASE_HOST = "your-server.database.windows.net"
+
+
+def describe_database_target(url: str) -> str:
+    """``host:port/database`` of a database URL — NEVER the user or the password.
+
+    For logging which database a tool (Alembic) is about to touch. An unparsable URL yields a fixed
+    string, because the parser's error text can echo the URL.
+    """
+    try:
+        parsed = make_url(url)
+    except Exception:  # noqa: BLE001 — never let a malformed URL's error text out
+        return "<unparsable DATABASE_URL>"
+    host = parsed.host or "?"
+    port = f":{parsed.port}" if parsed.port else ""
+    target = f"{host}{port}/{parsed.database or '?'}"
+    if host == PLACEHOLDER_DATABASE_HOST:
+        target += " (the template placeholder: DATABASE_URL is not configured)"
+    return target
 
 
 def get_version() -> str:

@@ -94,6 +94,8 @@ And a fourth, for anything touching the database layer: **no test connects to a 
 [`test_db_external.py`](../../apps/api/tests/test_db_external.py) for the read-only engine)
 monkeypatch `pyodbc.connect` to raise and prove the engines, the session dependencies, and the
 lifespan never call it;
+[`tests/conftest.py`](../../apps/api/tests/conftest.py) makes reading the real `apps/api/.env` a
+no-op in every test (temporary env files still load);
 [`test_alembic.py`](../../apps/api/tests/test_alembic.py) proves `alembic.ini` holds no URL,
 offline `upgrade --sql` runs without a database, and the history is a single linear head;
 [`test_migration_conversations.py`](../../apps/api/tests/test_migration_conversations.py) renders

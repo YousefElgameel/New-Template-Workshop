@@ -7,6 +7,25 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-10-06
+
+### Fixed
+
+- **Alembic now reads `apps/api/.env` like the service.** `alembic/env.py` calls `load_local_env()` before
+  resolving `DATABASE_URL`. Before, only `app.main` did, so `alembic check` / `upgrade` /
+  `revision --autogenerate` from a plain terminal silently used the template's placeholder URL
+  (`your-server.database.windows.net`) even when `.env` held a real one. A variable already exported
+  in the shell still wins, a missing file is a no-op, and the URL is never printed.
+  `tests/test_alembic_env_loading.py` covers all four, offline, and checks the URL that reaches Alembic.
+
+### Added
+
+- **`Alembic target: <host>:<port>/<database> (DATABASE_URL from shell|.env|default)`**, logged once before
+  Alembic connects, so a stale shell export cannot silently pick the database. It never shows the user or
+  password and flags the template placeholder host (`app.config.describe_database_target`, tested).
+- **`tests/conftest.py`**: reading the real `apps/api/.env` is a no-op in every test, so a developer's own
+  `EXTERNAL_DATABASE_URL` / `AZURE_*` / telemetry values can no longer leak into the pytest process.
+
 ## [0.4.1] — 2026-10-06
 
 ### Security

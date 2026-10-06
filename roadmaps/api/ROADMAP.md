@@ -109,6 +109,33 @@ need a human with access._
 - **notes:**
   - 2026-10-06 — added from the 1.3 security review (MEDIUM). `opentelemetry-instrumentation-sqlalchemy` 0.61b0 sets `span.set_status(ERROR, str(original_exception))`, and the original exception is the raw pyodbc error, so `hide_parameters` cannot reach it. Real example: SQL Server error 2628 ("String or binary data would be truncated … Truncated value: '…'") quotes the user's text. Not reachable today (titles are clamped to the column width, message content is `NVARCHAR(max)`), but it becomes reachable if a bounded text column is added or the clamp is removed. Do it before any endpoint writes content you cannot clamp.
 
+### 1.5 — Alembic reads `apps/api/.env` like the service does
+
+- **status:** done
+- **depends_on:** []
+- **layers:** [migration]
+- **acceptance:**
+  - `alembic check`, `alembic upgrade` and `alembic revision --autogenerate` run from a plain terminal use the `DATABASE_URL` in `apps/api/.env`, exactly as `just dev` does — no manual export needed
+  - a `DATABASE_URL` already set in the shell still wins (the file never overrides it), and a missing `.env` is a no-op
+  - nothing is printed or logged about the URL, and offline `--sql` still never connects
+- **how_to_test:**
+  - `just test` (or `uv run --directory apps/api pytest`) — expect **279 passed** in api (267 before; 12 new across `tests/test_alembic_env_loading.py`, `tests/test_config_database_target.py`; `tests/conftest.py` is new and changes no count)
+  - `uv run --directory apps/api ruff check app tests alembic` — expect `All checks passed!`
+  - the real check, from a plain terminal with **no** `DATABASE_URL` exported: `uv run --directory apps/api alembic check` — expect `INFO [alembic.env] Alembic target: <your-server>:1433/<your-database> (DATABASE_URL from .env)` and then `Target database is not up to date.` until the migration is applied (I ran this: it reached the database named in your `.env`, not the template placeholder)
+  - export a different URL first (`$env:DATABASE_URL = '…'`) and run it again — the line must now say `from shell`; unset it and it says `from .env`
+  - prove the tests bite: in `alembic/env.py` replace the `load_local_env()` line with `pass`, run `tests/test_alembic_env_loading.py` (2 fail), and put it back — I did this and restored it
+- **needs_human:**
+  - **look at the `Alembic target:` line above and confirm it is the database you intend to migrate.** Its server and database names look like a shared sandbox, not a Team Assistant database. I cannot tell whether that is intended; applying the migration creates two tables there
+  - reply **done** to close the item, or tell me what to change
+- **notes:**
+  - 2026-10-06 — added after `alembic check` fell back to the template placeholder host (`your-server.database.windows.net`) although `apps/api/.env` held a real URL: only `app/main.py` called `load_local_env()`, so every Alembic command ignored the file unless `DATABASE_URL` was exported. The docs (`write-migration` skill, `apps/api/CLAUDE.md`) already said the URL comes from `apps/api/.env`; this makes that true.
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — implemented; awaiting test by Yousef Wahid. Files: `alembic/env.py` (loads `.env`, logs the target), `app/config.py` (`describe_database_target`, `PLACEHOLDER_DATABASE_HOST`), `tests/conftest.py` (new), `tests/test_alembic_env_loading.py` (new), `tests/test_config_database_target.py` (new), `apps/api/CLAUDE.md`, `CHANGELOG.md` (0.4.2), `pyproject.toml`/`uv.lock` (0.4.2), `docs/development/testing.md`. Reviews: `code-reviewer` and `security-reviewer`, no blockers.
+  - 2026-10-06 — changes made because of the reviews: the one-line `Alembic target:` log (security MEDIUM: a stale shell export would silently pick the database); `tests/conftest.py` (reading the real `apps/api/.env` is a no-op in tests, so a developer's own `AZURE_*`/telemetry values cannot leak into the run); the tests now check the URL that reaches Alembic, not only `os.environ`. `LOCAL_ENV_FILE` is left untouched because an existing test pins its value, so the guard wraps `load_dotenv` instead.
+  - 2026-10-06 — known and accepted: the whole `.env` is loaded into the Alembic process, not only `DATABASE_URL` (same as the service; `env.py` imports no telemetry or AI code and reads nothing else). A `DATABASE_URL` exported in the shell wins over the file, even an empty one — documented in `apps/api/CLAUDE.md`. Driver tracebacks from a bad URL can still echo it: do not paste Alembic failures unredacted.
+  - 2026-10-06 — version 0.4.2 (PATCH).
+  - 2026-10-06 — confirmed by Yousef Wahid; closed. He also confirmed that the database named by the `Alembic target:` line (from `apps/api/.env`) is the intended dev database for the api 1.2 migration.
+
 ## Phase 2 — Conversation history (F2)
 
 ### 2.1 — Create, list and open conversations

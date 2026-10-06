@@ -70,7 +70,7 @@ this as a starting map; read the actual files when you need detail.
 - `repositories/` — query functions taking an `AsyncSession` (`conversations.py`): ORM only, they
   flush but never commit, and never log user content.
 - `../alembic/` + `../alembic.ini` — Alembic (async `env.py`, URL from `DATABASE_URL` via
-  `app.config`, never from the ini); `versions/` holds one revision (`5228ef6b6604`, not applied) —
+  `app.config` — `apps/api/.env` is loaded first, as the service does — never from the ini); `versions/` holds one revision (`5228ef6b6604`, not applied) —
   migrations are never run by an agent.
 - `ai/` — the AI runtime (ADR-0009, rule 70): `config.py` (`AZURE_AI_*`/`AZURE_SEARCH_*`/`AI_*`),
   `client.py` (**the mock seam** — `get_chat_model()`/`get_embeddings()`, managed identity when
@@ -113,7 +113,7 @@ this as a starting map; read the actual files when you need detail.
   `app.dependency_overrides[get_session]` and never need a database. External read-only data:
   `Depends(get_external_session)` (`EXTERNAL_DATABASE_URL`; unset ⇒ `ExternalDatabaseNotConfigured`).
 - **Alembic is wired; one revision, not applied.** `alembic/versions/` holds `5228ef6b6604` (creates
-  `conversations` + `messages`); the URL comes from `DATABASE_URL`
+  `conversations` + `messages`); the URL comes from `DATABASE_URL` (`env.py` loads `apps/api/.env` first, so a plain terminal works). **A `DATABASE_URL` already exported in the shell wins over the file** (even an empty one), so a stale export silently targets another database: before connecting, `env.py` logs one line, `Alembic target: <host>:<port>/<database> (DATABASE_URL from shell|.env|default)` (never the user or password), and says so when it is still the template placeholder. The whole `.env` is loaded into the Alembic process, not only the URL; nothing in `env.py` reads the other keys.
   through `app.config` (never `alembic.ini`). Autogenerate/`check` target the **dev** database;
   **applying is `.github/workflows/migrate.yml` (Environment-gated) or a named human** — agents
   only use offline/`heads`/`check` modes (root `CLAUDE.md` → _What you cannot do_).
