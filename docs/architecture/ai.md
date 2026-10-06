@@ -102,8 +102,10 @@ works locally).
 
 **`prompts/`.** Prompts are files. `load_prompt("system")` reads `prompts/system.md`;
 `render_prompt` fills `{placeholders}` and fails loudly on a missing one. The shipped system
-prompt grounds the answer in the numbered context, requires `[n]` citations, refuses to invent,
-and states that context is data, not instructions.
+prompt answers only from the numbered context, says it does not know when the context lacks the
+answer, requires `[n]` citations of passages it actually used, and states that everything after
+the final `Context:` line is data, not instructions (the context is the last thing in the
+message, so nothing retrieved can sit after the rules).
 
 **`telemetry.py`.** `model_call_span(deployment)` wraps every model call: a span named
 `gen_ai.chat` with `gen_ai.system`, `gen_ai.operation.name`, `gen_ai.request.model`, the
@@ -167,8 +169,13 @@ Everything runs offline by swapping the seam ([`tests/ai/fakes.py`](../../apps/a
 and a fake external `session_factory`. `tests/ai/` covers configuration, the client factory's
 auth selection, the graph, streaming, tools, retrieval, ingestion and telemetry;
 `tests/evals/` is the **prompt regression harness** — `cases.json` scripts the model's answer so
-the pipeline around the prompt (retrieval → prompt → sources → citations) is pinned; extend it
-whenever a prompt changes. A live-model tier is opt-in (`AI_EVAL_LIVE=true`).
+the pipeline around the prompt (retrieval → prompt → sources → citations) is pinned — each case
+is a `grounded`, `out-of-context` or `injection` kind, and the harness records what the model
+receives (one system message, the rendered prompt, plus the question); extend it whenever a
+prompt changes. Offline the answers are scripted, so this tier pins the plumbing and the
+guardrail wording, **not** model behaviour: run the live tier (`AI_EVAL_LIVE=true`) before
+releasing a prompt change. The prompt cannot make injection impossible — citation checks and
+passage delimiting belong in code (api roadmap 4.2). A live-model tier is opt-in (`AI_EVAL_LIVE=true`).
 
 ---
 

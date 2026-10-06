@@ -274,7 +274,7 @@ need a human with access._
 
 ### 4.1 — Assistant prompt and eval cases
 
-- **status:** todo
+- **status:** done
 - **depends_on:** []
 - **layers:** [ai]
 - **acceptance:**
@@ -282,11 +282,17 @@ need a human with access._
   - eval cases (in `tests/evals/cases.json`) cover: a grounded answer, an out-of-context question, and a corpus passage that tries to inject an instruction (the answer must ignore it)
   - the cases run offline against the fake model
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `cd apps/api && uv run pytest tests/evals` → 19 passed (8 cases × 2 checks, plus the guardrail, coverage and "obeying model fails" tests); `uv run pytest` → 362 passed; `uv run ruff check app tests alembic` clean
+  - read `apps/api/app/ai/prompts/system.md`: data-not-instructions rule, "do not know" rule, `[n]` citations, context last
+  - optional, needs a real deployment (see needs_human): `AI_EVAL_LIVE=true uv run pytest tests/evals/test_evals.py::test_eval_case` — the same cases graded against the real model
 - **needs_human:**
-  - none
+  - read the prompt wording and say what to change (tone, scope, language)
+  - optional: run the live eval tier once the dev Foundry deployment is reachable (`AZURE_AI_*` in `apps/api/.env`); the offline tier cannot show how the real model reacts to an injected passage
 - **notes:**
   - 2026-10-06 — planned.
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — implemented by Claude. Files: `app/ai/prompts/system.md`, `tests/evals/cases.json` + `test_evals.py`, `docs/architecture/ai.md`, CHANGELOG, api 0.5.1 (`pyproject.toml`, `uv.lock`). No code outside the prompt and tests changed. Reviews: code-reviewer (5 should-fix: 2–5 applied — narrowed forbidden strings, one clear citation rule, the real `(no context available)` marker, the header format described; 1 applied as honest wording, since offline answers are scripted) and security-reviewer (no critical; prompt wording applied; code-side findings recorded on 4.2). Mutation-checked: inverted injection rule, context sent twice, marker dropped/changed, text after the slot.
+  - 2026-10-06 — confirmed by Yousef Wahid (offline tier ran green on their machine: 19 passed). The live eval tier was not run.
 
 ### 4.2 — Ask in a conversation (JSON)
 
@@ -308,6 +314,7 @@ need a human with access._
 - **notes:**
   - 2026-10-06 — planned. The web hop timeout must exceed 60 s plus retries (rule 70) — note for the web roadmap.
   - 2026-10-06 — from the 1.1 security review: the request schema caps `question` at 4,000 characters, `citations` come only from retrieval results (never from the request body), each citation is `{title, path}` strings of bounded length, and `token_count` is non-negative.
+  - 2026-10-06 — from the 4.1 security review (code-side, so they belong here, not in the prompt): (1) `Answer.sources` and the `sources` frame are every retrieved chunk's source, and the `[n]` markers in the answer are never checked — validate `[n]` against the number of passages and build the stored/returned `citations` from retrieval only, never from model-written paths; (2) `format_context` inserts `content` and `source` raw, so a passage can forge a `[n] (path)` header — delimit passages unforgeably (collapse newlines in `source`, neutralise header-like lines in `content`); (3) history: map stored rows with role `user` → `HumanMessage` and `assistant` → `AIMessage` only, never a `SystemMessage` from stored text, with a test; note that `[n]` is renumbered every turn, so old `[n]` in history do not refer to this turn's passages; (4) check how the web renders answers (markdown images/links) before the first live answer.
 
 ### 4.3 — Streaming ask
 
