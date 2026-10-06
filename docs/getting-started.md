@@ -1,7 +1,7 @@
 # Getting started
 
-Onboarding guide for a developer joining an AI project built on the **Team Assistant** (the
-Diriyah Company AI team's starter template, built by Orion Digital Solutions). It takes you
+Onboarding guide for a developer joining the **Team Assistant** project, built on the **AI
+Accelerator** (the Diriyah Company AI team's starter template, built by Orion Digital Solutions). It takes you
 from a fresh clone to a running two-service stack with a verified `trace_id` flowing end to
 end, and points at the deeper documentation once you are productive.
 

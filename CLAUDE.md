@@ -9,7 +9,7 @@ assume it's the only source of truth.
 the team's own documentation (`docs/**/*.md`, indexed in Azure AI Search) with citations, and
 keeps conversation history in Azure SQL; no login yet (internal only, Okta later). Features and
 design: [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) Part B. Built on
-the **Team Assistant** — the Diriyah Company AI team's starter monorepo, built and maintained by
+the **AI Accelerator** — the Diriyah Company AI team's starter monorepo, built and maintained by
 **Orion Digital Solutions** — so the identity strings are `Team Assistant` / `team-assistant` /
 `@team-assistant/*`,
 targeting Azure deployment via **Bicep** on a **shared, cloud-team-owned platform** (Foundry, Container Apps Environment, Container Registry, AI Search service pre-exist per environment; this project deploys only its own container apps, database, storage, Key Vault and Search index — ADR-0012; see [`README.md`](README.md) → _Scope & delivery status_). The repo is a polyglot
