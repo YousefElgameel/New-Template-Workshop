@@ -7,6 +7,19 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-10-06
+
+### Security
+
+- **Database errors no longer carry bound parameters.** The project and the external read-only engine
+  are created with `hide_parameters=True`: `str(exc)`, `repr(exc)` and the OTel `exception.message` /
+  `exception.stacktrace` for a `DBAPIError` show `[SQL parameters hidden …]` instead of the values
+  (message text, titles, citations). `tests/test_db_error_hygiene.py` covers both engines, the span
+  event (with a control case proving the leak path is real) and that the response and logs of a failing
+  request hold only the exception kind. **Not covered:** SQL Server's own error text (e.g. a truncation
+  error quoting the value) still reaches the DB span's status description — tracked as roadmap api 1.4.
+  Found by the api 1.1 security review.
+
 ## [0.4.0] — 2026-10-06
 
 ### Added

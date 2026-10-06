@@ -45,6 +45,11 @@ def get_engine() -> AsyncEngine:
             # (and its gateway) drops idle connections; a stale one would
             # otherwise surface as a request-time error.
             pool_pre_ping=True,
+            # Keep bound parameter VALUES out of ``str(exc)``/``repr(exc)``. They are user
+            # content (message text, titles, citations); without this an IntegrityError or
+            # DataError carries ``[parameters: (...)]``, and the OTel instrumentation copies
+            # ``str(exc)`` and the traceback onto the span (``exception.message``).
+            hide_parameters=True,
         )
         # Never log the URL (it carries credentials) — the host is enough.
         get_logger("app.db").info(

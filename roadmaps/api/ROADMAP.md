@@ -69,7 +69,7 @@ need a human with access._
 
 ### 1.3 — Keep SQL parameters out of database errors
 
-- **status:** todo
+- **status:** done
 - **depends_on:** []
 - **layers:** [model]
 - **acceptance:**
@@ -77,11 +77,37 @@ need a human with access._
   - a test asserts the setting on the engine; the external read-only engine gets the same
   - no log line, response body or span includes exception text from the database layer (checked by a test that raises a failing statement and inspects the error handler's output)
 - **how_to_test:**
+  - `just test` (or `uv run --directory apps/api pytest`) — expect **267 passed** in api (257 before, plus 10 new in `tests/test_db_error_hygiene.py`; `test_db_engine.py` gained one assertion)
+  - `uv run --directory apps/api ruff check app tests alembic` — expect `All checks passed!`
+  - `uv run --directory apps/api pytest tests/test_db_error_hygiene.py -v` — expect 10 passed, including **a failing INSERT sent through the real project engine** (no connection) whose `str(exc)` shows `[SQL parameters hidden due to hide_parameters=True]` and not the message text, the same for the read-only external engine, and a control test that flips the setting off and sees the text leak
+  - prove the tests bite: in `app/db/engine.py` change `hide_parameters=True` to `False`, run `tests/test_db_error_hygiene.py` and `tests/test_db_engine.py` (5 fail), then change it back — I did exactly this and restored it
+  - nothing connects to a database; `pyodbc.connect` is patched to fail in these tests
+- **needs_human:**
+  - none for this item. Reply **done** to close it. (The residual risk — SQL Server's own error text on DB spans — is tracked as 1.4; your call when.)
+- **notes:**
+  - 2026-10-06 — added after the 1.1 security review (MEDIUM): user content could otherwise reach logs through SQLAlchemy exception text. Touches `app/db/engine.py` and `external.py`, which is why it is its own item. Do it before 2.1 ships.
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — implemented; awaiting test by Yousef Wahid. Files: `app/db/engine.py`, `app/db/external.py` (one kwarg each), `tests/test_db_error_hygiene.py` (new), `tests/test_db_engine.py`, `apps/api/CLAUDE.md`, `CHANGELOG.md` (0.4.1), `pyproject.toml`/`uv.lock` (0.4.1), `docs/architecture/data.md`, `.claude/rules/25-sqlalchemy.md` (the engine line now shows the kwarg). Reviews: `code-reviewer` and `security-reviewer`, no blockers; fixed their points (a failing statement now goes through the real engine path instead of a hand-built exception; the instrumentor test pins the kwarg; docs state what is NOT covered).
+  - 2026-10-06 — acceptance bullet 1 is true for the **bound parameters** SQLAlchemy appends. It cannot cover the **driver's own message** (`exc.orig`), which SQL Server writes; see 1.4. Bullet 3 holds for logs and responses (handlers log only exception kind and place); span events now carry the hidden placeholder, but the DB span's status description still carries the driver text.
+  - 2026-10-06 — left alone on purpose: `alembic/env.py` creates its own engine without the flag (migrations run under the CLI or `migrate.yml`, DDL carries no user content); a one-line change if you want consistency.
+  - 2026-10-06 — version bumped to 0.4.1 (PATCH, security hardening, no contract change).
+  - 2026-10-06 — confirmed by Yousef Wahid; closed.
+
+### 1.4 — Keep driver error text off database spans
+
+- **status:** todo
+- **depends_on:** [1.3]
+- **layers:** [model]
+- **acceptance:**
+  - the exception text SQL Server returns (`exc.orig`) never reaches a span's status description or events: an OTel span processor (or exporter filter) replaces the description on database client spans with the exception kind
+  - a test puts a secret in a fake driver error, sends it through the real engine path like the 1.3 tests, and shows the exported span carries only the kind
+  - a failing statement still shows its exception _kind_ on the span, so errors stay diagnosable
+- **how_to_test:**
   - _(filled in by `/implement-next`)_
 - **needs_human:**
   - none
 - **notes:**
-  - 2026-10-06 — added after the 1.1 security review (MEDIUM): user content could otherwise reach logs through SQLAlchemy exception text. Touches `app/db/engine.py` and `external.py`, which is why it is its own item. Do it before 2.1 ships.
+  - 2026-10-06 — added from the 1.3 security review (MEDIUM). `opentelemetry-instrumentation-sqlalchemy` 0.61b0 sets `span.set_status(ERROR, str(original_exception))`, and the original exception is the raw pyodbc error, so `hide_parameters` cannot reach it. Real example: SQL Server error 2628 ("String or binary data would be truncated … Truncated value: '…'") quotes the user's text. Not reachable today (titles are clamped to the column width, message content is `NVARCHAR(max)`), but it becomes reachable if a bounded text column is added or the clamp is removed. Do it before any endpoint writes content you cannot clamp.
 
 ## Phase 2 — Conversation history (F2)
 

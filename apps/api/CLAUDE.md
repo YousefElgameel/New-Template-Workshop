@@ -102,6 +102,13 @@ this as a starting map; read the actual files when you need detail.
   Deployed apps get the managed-identity form (`Authentication=ActiveDirectoryMsi`, username =
   identity client id) from Key Vault; developers get the dev database's URL from Key Vault too —
   **there is no local database.**
+- **No user content in database errors.** Both engines are created with `hide_parameters=True`, so
+  `str(exc)`, `repr(exc)` and the OTel span event for an `IntegrityError`/`DataError` never carry bound
+  values (message text, titles, citations) — `tests/test_db_error_hygiene.py` fails if either engine
+  loses the setting. It does **not** hide the *driver's* own message, which SQL Server writes and which the OTel
+  SQLAlchemy instrumentor copies onto the DB span's status description: a truncation error
+  (2628, "… Truncated value: '…'") or a duplicate-key error can quote user text. Keep input clamped to
+  column width, never log `str(exc)` from DB code (log the kind and place only), and see roadmap api 1.4.
 - **Session per request** via `Depends(get_session)`; tests override it with
   `app.dependency_overrides[get_session]` and never need a database. External read-only data:
   `Depends(get_external_session)` (`EXTERNAL_DATABASE_URL`; unset ⇒ `ExternalDatabaseNotConfigured`).

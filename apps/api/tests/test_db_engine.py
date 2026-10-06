@@ -118,6 +118,8 @@ def test_engine_resolves_create_async_engine_at_call_time(
 
     def wrapped(url: str, **kwargs: Any) -> AsyncEngine:
         seen.append(str(url))
+        # The instrumentor passes our kwargs through untouched (1.3: no values in DB errors).
+        assert kwargs["hide_parameters"] is True
         return original(url, **kwargs)
 
     monkeypatch.setattr(sa_asyncio, "create_async_engine", wrapped)
