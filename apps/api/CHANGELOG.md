@@ -7,6 +7,23 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-10-06
+
+### Security
+
+- **SQL Server's own error text no longer reaches database spans.** The OTel SQLAlchemy instrumentor exports
+  the driver's raw message on two paths — a failed statement (the span's status description) and a failed
+  connection (the `connect` span records the exception event and sets the status) — and the message can quote
+  user content (a truncation error carries `Truncated value: '…'`) or the login name. `hide_parameters` (0.4.1)
+  cannot reach either. `app.observability.hide_driver_error_text` now swaps both hooks for versions that report
+  only the exception kind (`IntegrityError`, `DBAPIError`, …), so failures stay diagnosable and content-free.
+  It runs before `instrument()` and **fails closed**: if the swap is impossible, no DB spans are started.
+  `tests/test_db_span_hygiene.py` sends failures through the real engine paths and reads the exported spans,
+  with a control for each path proving the leak was real, and reads the upstream source so an instrumentor bump
+  fails loudly. `tests/conftest.py` restores the hooks after every test. Closes the gap recorded in 0.4.1.
+  **Still open:** a DB error that escapes after a streamed response has started is recorded on the FastAPI
+  server span (roadmap api 4.3).
+
 ## [0.4.2] — 2026-10-06
 
 ### Fixed
@@ -36,7 +53,7 @@ The two services version independently.
   (message text, titles, citations). `tests/test_db_error_hygiene.py` covers both engines, the span
   event (with a control case proving the leak path is real) and that the response and logs of a failing
   request hold only the exception kind. **Not covered:** SQL Server's own error text (e.g. a truncation
-  error quoting the value) still reaches the DB span's status description — tracked as roadmap api 1.4.
+  error quoting the value) still reached the DB span's status description — closed in 0.4.3.
   Found by the api 1.1 security review.
 
 ## [0.4.0] — 2026-10-06

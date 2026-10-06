@@ -28,3 +28,23 @@ def _load_dotenv_except_the_real_file(dotenv_path: Any = None, *args: Any, **kwa
 
 
 config_mod.load_dotenv = _load_dotenv_except_the_real_file
+
+
+# --- OpenTelemetry SQLAlchemy hooks ------------------------------------------------------------
+# ``app.observability.hide_driver_error_text`` rebinds two module attributes of the instrumentor
+# (see tests/test_db_span_hygiene.py). Tests that run the real ``_instrument_sqlalchemy`` would
+# leave them swapped for the rest of the session and make later tests order-dependent, so the
+# ORIGINALS are captured once here and put back after every test.
+import opentelemetry.instrumentation.sqlalchemy as _otel_sa_package  # noqa: E402
+import pytest  # noqa: E402
+from opentelemetry.instrumentation.sqlalchemy import engine as _otel_sa_engine  # noqa: E402
+
+_ORIGINAL_HANDLE_ERROR = _otel_sa_engine._handle_error
+_ORIGINAL_WRAP_CONNECT = _otel_sa_package._wrap_connect
+
+
+@pytest.fixture(autouse=True)
+def _restore_otel_sqlalchemy_hooks() -> Any:
+    yield
+    _otel_sa_engine._handle_error = _ORIGINAL_HANDLE_ERROR
+    _otel_sa_package._wrap_connect = _ORIGINAL_WRAP_CONNECT

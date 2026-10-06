@@ -39,7 +39,7 @@ need a human with access._
 
 ### 1.2 — First migration (create both tables)
 
-- **status:** awaiting-test
+- **status:** done
 - **depends_on:** [1.1]
 - **layers:** [migration]
 - **acceptance:**
@@ -66,6 +66,7 @@ need a human with access._
   - 2026-10-06 — implemented; awaiting test by Yousef Wahid. Files: `alembic/versions/20261006_1321-5228ef6b6604_create_conversations_and_messages.py`, `tests/test_migration_conversations.py` (new), `tests/test_alembic.py` (two "no revisions" assertions replaced), `alembic.ini` comment, docs (`apps/api/CLAUDE.md`, `README.md`, `CHANGELOG.md`, root `README.md`/`CLAUDE.md`, `docs/architecture/data.md`, `docs/design/db-design.md`, `docs/development/testing.md`, `docs/reference/commands.md`, `docs/getting-started.md`). Reviews: `code-reviewer` and `security-reviewer`, no blockers; fixed their points (tests no longer pinned to the head, parity checks every table and compares sorted lists, the batch split is on a `GO` line, stale docs corrected). Version stays 0.4.0 (unreleased, nothing tagged): the changelog entry went into it.
   - 2026-10-06 — not done, deliberately: an opt-in real-database test of `seq` — it would write rows to the dev database, which must not happen before the migration is applied and you have chosen to; needs an explicit `RUN_DB_TESTS=1`-style opt-in, so it is proposed for after the apply.
   - 2026-10-06 — proposals from the reviews, for you to decide (not applied): (1) make `downgrade()` refuse to run unless an explicit opt-in env var is set, since it drops both tables and all data and the only guard today is the GitHub Environment reviewers on `migrate.yml`; (2) name the three `DEFAULT` constraints (SQL Server auto-names them, which makes a later `ALTER` of a default harder); (3) confirm the migrate service principal and the runtime identity stay separate accounts. Template-owned text that still says "no migrations" (ARCHITECTURE.md Part A, `.claude/rules/35-fastapi.md`, `.claude/agents/migration-author.md`, `.claude/skills/write-migration/SKILL.md`, `.claude/commands/write-migration.md`) was left alone.
+  - 2026-10-06 — applied to the dev database by Yousef Wahid (the target shown by `Alembic target:`, URL from `apps/api/.env`). `alembic check` then printed `No new upgrade operations detected.` — no drift between the models and the database, which was the one acceptance point that could not be proven offline; the feared false drift on `ix_conversations_updated_at` did not occur. Confirmed by Yousef Wahid; closed.
 
 ### 1.3 — Keep SQL parameters out of database errors
 
@@ -95,7 +96,7 @@ need a human with access._
 
 ### 1.4 — Keep driver error text off database spans
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [1.3]
 - **layers:** [model]
 - **acceptance:**
@@ -103,11 +104,23 @@ need a human with access._
   - a test puts a secret in a fake driver error, sends it through the real engine path like the 1.3 tests, and shows the exported span carries only the kind
   - a failing statement still shows its exception _kind_ on the span, so errors stay diagnosable
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `just test` (or `uv run --directory apps/api pytest`) — expect **288 passed** in api (279 before, plus 9 in `tests/test_db_span_hygiene.py`)
+  - `uv run --directory apps/api ruff check app tests alembic` — expect `All checks passed!`
+  - `uv run --directory apps/api pytest tests/test_db_span_hygiene.py -v` — expect 9 passed: for **a failing statement** and for **a failing connection** there is a control (the driver message IS on the span without the swap) and a test (only the exception kind is, and no exception event on the connect span); plus idempotence, "swap is in place before `instrument()` runs", "no DB spans if the swap is impossible", and a test that reads the upstream package source
+  - order independence: `pytest tests/test_observability_config.py tests/test_db_span_hygiene.py` and the reverse order — both 44 passed
+  - prove the tests bite: in `app/observability.py` make `_safe_handle_error` use `str(context.original_exception)`, or change `record_exception=False` to `True` in `_safe_wrap_connect`; the matching test fails each time (I did both and restored them)
+  - nothing connects to a database; `pyodbc.connect` is patched to fail
 - **needs_human:**
-  - none
+  - none for this item. Reply **done** to close it. (An optional live check needs Application Insights, which is not set up: with a connection string and a failing statement, the dependency row's result description should be an exception name, not SQL Server's message.)
 - **notes:**
   - 2026-10-06 — added from the 1.3 security review (MEDIUM). `opentelemetry-instrumentation-sqlalchemy` 0.61b0 sets `span.set_status(ERROR, str(original_exception))`, and the original exception is the raw pyodbc error, so `hide_parameters` cannot reach it. Real example: SQL Server error 2628 ("String or binary data would be truncated … Truncated value: '…'") quotes the user's text. Not reachable today (titles are clamped to the column width, message content is `NVARCHAR(max)`), but it becomes reachable if a bounded text column is added or the clamp is removed. Do it before any endpoint writes content you cannot clamp.
+  - 2026-10-06 — started by Claude. Picked by the skill's rule (first `todo` in phase order with its dependencies done), ahead of 2.1.
+  - 2026-10-06 — implemented; awaiting test by Yousef Wahid. Files: `app/observability.py` (`_safe_handle_error`, `_safe_wrap_connect`, `hide_driver_error_text`, `_instrument_sqlalchemy` now fails closed), `tests/test_db_span_hygiene.py` (new), `tests/conftest.py` (restores the instrumentor hooks after each test), `apps/api/CLAUDE.md`, `CHANGELOG.md` (0.4.3), `pyproject.toml`/`uv.lock` (0.4.3), `.claude/rules/60-observability.md`. Reviews: `code-reviewer` and `security-reviewer`.
+  - 2026-10-06 — the security review found a second leak path I had missed: a failed **connection** (login rejected, firewall, unreachable host) is recorded by the instrumentor's `connect` span as an exception event + status, and `handle_error` never sees it (no execution context). Verified in the installed source (`_wrap_connect`, wired in the package's `instrument()`), and a control test shows the message on the span. Both paths are now swapped. The code reviewer called that wrapper "dead code" — that was wrong; I checked the source rather than trust either report.
+  - 2026-10-06 — also from the reviews: the swap runs BEFORE `instrument()` (the package binds `_wrap_connect` by name), and fails closed (no DB spans) instead of warning and carrying on; tests no longer depend on run order (conftest restores the hooks; the pin test reads module source instead of the live attribute).
+  - 2026-10-06 — NOT covered, recorded on 4.3: a DB error that escapes after a **streamed** response has started is re-raised by `UnhandledErrorMiddleware` and recorded by the FastAPI instrumentation on the server span (`exception.message` carries the driver text). No route writes to the database while streaming yet. Also: under the `opentelemetry-instrument` launcher the instrumentor could start before the swap — the Dockerfile uses plain `uvicorn`; documented in `apps/api/CLAUDE.md`. `db.user` (the login name under SQL auth) and `db.statement` (placeholders only) are exported as before.
+  - 2026-10-06 — version 0.4.3 (PATCH, security hardening, no contract change).
+  - 2026-10-06 — confirmed by Yousef Wahid; closed.
 
 ### 1.5 — Alembic reads `apps/api/.env` like the service does
 
@@ -290,6 +303,7 @@ need a human with access._
   - none beyond 4.2's live-check prerequisites
 - **notes:**
   - 2026-10-06 — planned. The web roadmap's chat item depends on this one (`api:4.3`) and on the frame shapes above.
+  - 2026-10-06 — from the 1.4 security review: if a database error escapes after the stream has started (for example persisting the assistant message at the end), `UnhandledErrorMiddleware` re-raises it and the FastAPI instrumentation records `str(exc)` and the traceback on the server span — including SQL Server's own message, which can quote the text. The stream must therefore catch database errors itself and end with the bounded `error` frame, never re-raise after `http.response.start`; add a test that fails a DB write mid-stream and checks the exported server span carries no driver text.
 
 ## Phase 5 — Hardening
 

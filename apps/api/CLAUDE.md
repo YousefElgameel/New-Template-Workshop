@@ -105,10 +105,18 @@ this as a starting map; read the actual files when you need detail.
 - **No user content in database errors.** Both engines are created with `hide_parameters=True`, so
   `str(exc)`, `repr(exc)` and the OTel span event for an `IntegrityError`/`DataError` never carry bound
   values (message text, titles, citations) — `tests/test_db_error_hygiene.py` fails if either engine
-  loses the setting. It does **not** hide the *driver's* own message, which SQL Server writes and which the OTel
-  SQLAlchemy instrumentor copies onto the DB span's status description: a truncation error
-  (2628, "… Truncated value: '…'") or a duplicate-key error can quote user text. Keep input clamped to
-  column width, never log `str(exc)` from DB code (log the kind and place only), and see roadmap api 1.4.
+  loses the setting. That flag does not cover the *driver's* own message (SQL Server writes it: a truncation error,
+  2628, quotes `Truncated value: '…'`; a duplicate-key error quotes the key; a failed login names the user).
+  The OTel SQLAlchemy instrumentor exports it on **two** paths — the status description of a failed
+  statement (`handle_error`) and the exception event + status of a failed connection (the `connect` span from
+  `_wrap_connect`) — so `app.observability.hide_driver_error_text` swaps both for versions that report only the
+  exception **kind**. It runs BEFORE `SQLAlchemyInstrumentor().instrument()` (the package binds `_wrap_connect`
+  by name) and **fails closed**: if the swap is impossible, no DB spans are started. Do not run the service under
+  the `opentelemetry-instrument` launcher, which would start the instrumentor first. `tests/test_db_span_hygiene.py`
+  covers both paths with controls, and reads the upstream *source*, so bumping
+  `opentelemetry-instrumentation-sqlalchemy` fails loudly. Still: keep input clamped to column width and never log
+  `str(exc)` from DB code (log the kind and place only). One path remains open: an error that escapes after a
+  streamed response has started is recorded on the FastAPI server span (see roadmap api 4.3).
 - **Session per request** via `Depends(get_session)`; tests override it with
   `app.dependency_overrides[get_session]` and never need a database. External read-only data:
   `Depends(get_external_session)` (`EXTERNAL_DATABASE_URL`; unset ⇒ `ExternalDatabaseNotConfigured`).

@@ -141,6 +141,12 @@ The structured stdout line is the source of truth; export is a **tee**, never a 
   (`engine=`): the instrumentor's singleton guard would silently skip the second engine. Decision
   - trade-offs: [ADR-0008](../../docs/adr/0008-azure-sql-data-layer.md) (supersedes ADR-0004's
     driver-level approach).
+- **No driver text on DB spans.** The instrumentor's own hooks would put SQL Server's raw message (which can
+  quote user content) on the span: `handle_error` as the status description of a failed statement, and the
+  `connect` span as an exception event + status of a failed connection. `hide_driver_error_text`
+  (`app/observability.py`) replaces both with the exception _kind_, runs before `instrument()`, and fails closed
+  (no DB spans if it cannot). Engines also set `hide_parameters=True`. Never export `str(exc)` from DB errors on a
+  span, log or metric.
 - **End-to-end proof pending [HUMAN]:** one `/api/ping-backend` request (web → api) must
   show a single `operation_Id` across `AppRequests`/`AppDependencies`/`AppTraces` with the
   Application Map edge drawn — run during the Phase 6 smoke once a real resource exists.

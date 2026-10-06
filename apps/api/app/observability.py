@@ -196,13 +196,120 @@ def _instrument_sqlalchemy(log: Any) -> None:
     every lazy engine created later (project + external read-only). Not part of
     the Azure distro's default set, hence explicit. Best-effort: a failure here
     only costs DB spans, never the service.
+
+    FAILS CLOSED on content: the driver-error-text swap (:func:`hide_driver_error_text`) must be in
+    place BEFORE ``instrument()``, because the package binds ``_wrap_connect`` by name when it is
+    imported and registers ``_handle_error`` when each engine is wrapped. If the swap is impossible,
+    the instrumentor is NOT started — no DB spans rather than spans that export SQL Server's own
+    error text.
     """
     try:
+        if not hide_driver_error_text(log):
+            log.warning("database spans disabled: driver error text could not be hidden")
+            return
         from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
         SQLAlchemyInstrumentor().instrument()
     except Exception as exc:  # noqa: BLE001
         log.warning("sqlalchemy instrumentation failed", error=str(exc))
+
+
+def _safe_handle_error(context: Any) -> None:
+    """The instrumentor's ``handle_error`` hook (a statement failed), minus the driver's message.
+
+    Upstream (``opentelemetry-instrumentation-sqlalchemy`` 0.61b0, ``engine._handle_error``) sets
+    the DB client span's status description to ``str(context.original_exception)`` — the raw
+    pyodbc error SQL Server wrote. That text can quote user content (a truncation error carries
+    "Truncated value: '…'", a duplicate-key error the key), and ``hide_parameters`` cannot reach it
+    because it is not a bound parameter. Here the description is the exception *kind* only, so a
+    failing statement stays diagnosable (``IntegrityError``, ``ProgrammingError``, …) and
+    content-free. Mirrors upstream otherwise: mark the span ERROR and end it.
+    """
+    from opentelemetry.trace import Status, StatusCode
+
+    span = getattr(context.execution_context, "_otel_span", None)
+    if span is None:
+        return
+    if span.is_recording():
+        span.set_status(Status(StatusCode.ERROR, type(context.original_exception).__name__))
+    span.end()
+
+
+def _safe_wrap_connect(tracer: Any) -> Any:
+    """The instrumentor's ``Engine.connect`` wrapper, without recording the driver's message.
+
+    Upstream (``engine._wrap_connect``) opens a ``connect`` CLIENT span with the tracer's
+    defaults, ``record_exception=True`` and ``set_status_on_exception=True``: a failed login, a
+    blocked firewall or an unreachable host puts pyodbc's message (login name, server, driver
+    diagnostics) on the span as an exception event AND as the status description. A connect
+    failure has no execution context, so ``_handle_error`` never sees it. Same span and
+    attributes here; the failure is reported as the exception *kind* only, and no exception
+    event is recorded.
+    """
+    from opentelemetry import trace
+    from opentelemetry.instrumentation.sqlalchemy import engine as sa_engine
+
+    def wrapped(func: Any, module: Any, args: Any, kwargs: Any) -> Any:
+        if not sa_engine.is_instrumentation_enabled():
+            return func(*args, **kwargs)
+        with tracer.start_as_current_span(
+            "connect",
+            kind=trace.SpanKind.CLIENT,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            if span.is_recording():
+                attrs, _ = sa_engine._get_attributes_from_url(module.url)
+                span.set_attributes(attrs)
+                span.set_attribute(sa_engine.DB_SYSTEM, sa_engine._normalize_vendor(module.name))
+            try:
+                return func(*args, **kwargs)
+            except BaseException as exc:
+                if span.is_recording():
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, type(exc).__name__))
+                raise
+
+    return wrapped
+
+
+# Upstream names the swap relies on (all private, all pinned to the distro's 0.61b0 line).
+_UPSTREAM_ENGINE_NAMES = (
+    "_handle_error",
+    "is_instrumentation_enabled",
+    "_get_attributes_from_url",
+    "_normalize_vendor",
+    "DB_SYSTEM",
+)
+
+
+def hide_driver_error_text(log: Any) -> bool:
+    """Replace the instrumentor's two error paths with the content-free versions above.
+
+    Returns False — without touching anything — if an upstream name has gone missing, so the caller
+    can refuse to start the instrumentor. MUST run before ``SQLAlchemyInstrumentor().instrument()``
+    and before any engine is created. Idempotent. Version-pinned on purpose;
+    ``tests/test_db_span_hygiene.py`` fails if a bump changes the upstream source it replaces.
+    Under the ``opentelemetry-instrument`` launcher the instrumentor could start before this runs;
+    the Dockerfile uses plain ``uvicorn app.main:app``, so keep it that way.
+    """
+    try:
+        import opentelemetry.instrumentation.sqlalchemy as sa_package
+        from opentelemetry.instrumentation.sqlalchemy import engine as sa_engine
+
+        missing = [name for name in _UPSTREAM_ENGINE_NAMES if not hasattr(sa_engine, name)]
+        if not callable(getattr(sa_package, "_wrap_connect", None)):
+            missing.append("package._wrap_connect")
+        if missing:
+            raise AttributeError(f"upstream names not found: {', '.join(missing)}")
+        sa_engine._handle_error = _safe_handle_error
+        sa_package._wrap_connect = _safe_wrap_connect
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "could not hide driver error text from DB spans — DB spans stay off",
+            error=str(exc),
+        )
+        return False
 
 
 def _instrument_system_metrics(log: Any) -> None:
