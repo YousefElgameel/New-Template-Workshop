@@ -88,7 +88,7 @@ Exactly the contract the application code expects (`apps/*/.env.example`, no cod
 
 ## Naming
 
-`<slug>` = `projectSlug` (≤ 15 chars, rewritten by `/rename-project`); `<env>` = `dev|staging|prod`.
+`<slug>` = `projectSlug` (≤ 15 chars, set once when the project was initialised); `<env>` = `dev|staging|prod`.
 
 | Resource        | Name                                      | Resource          | Name                                     |
 | --------------- | ----------------------------------------- | ----------------- | ---------------------------------------- |

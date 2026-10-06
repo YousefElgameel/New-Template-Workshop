@@ -1,6 +1,6 @@
 # Getting started
 
-Onboarding guide for a developer joining an AI project built on the **AI Accelerator** (the
+Onboarding guide for a developer joining an AI project built on the **Team Assistant** (the
 Diriyah Company AI team's starter template, built by Orion Digital Solutions). It takes you
 from a fresh clone to a running two-service stack with a verified `trace_id` flowing end to
 end, and points at the deeper documentation once you are productive.
@@ -104,21 +104,6 @@ Corporate proxy / certificate errors, corepack signature errors, WSL2 for Docker
 other cases are in the skill's playbook
 ([`.claude/skills/setup-dev-env/SKILL.md`](../.claude/skills/setup-dev-env/SKILL.md) → _When
 something fails_).
-
----
-
-## Using this template
-
-If you are **starting a new AI project** from the template, rename it once, immediately
-after cloning, before writing any feature code. Every project-identity string is a placeholder
-from one of four families (`AI Accelerator`, `ai-accelerator`, `@ai-accelerator/*`,
-`ai-accelerator-api`), and the repo ships a `/rename-project` command that replaces them all
-in one pass and regenerates `apps/api/uv.lock`.
-
-Full instructions and the placeholder table: [_Using this template_](../README.md#using-this-template).
-
-If you are **joining a project that has already been renamed**, skip this — the names you see
-are your project's names, and this guide's `ai-accelerator` references map onto them.
 
 ---
 
@@ -329,11 +314,10 @@ You ran a local production `pnpm -C apps/web build` and then `next dev` against 
 ### `uv sync --frozen` fails after renaming the project
 
 `apps/api/uv.lock` records the project's own package name, so renaming
-`ai-accelerator-api` in `pyproject.toml` invalidates it and the Docker build (which uses
+`team-assistant-api` in `pyproject.toml` invalidates it and the Docker build (which uses
 `--frozen`) fails.
 
-**Fix:** run `uv lock` in `apps/api`, then rebuild. `/rename-project` does this
-automatically; a manual rename does not.
+**Fix:** run `uv lock` in `apps/api`, then rebuild. Re-run it after any change to the package name.
 
 ### `pnpm install --frozen-lockfile` fails in a Docker build
 

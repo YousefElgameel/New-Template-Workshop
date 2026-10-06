@@ -1,8 +1,8 @@
 # apps/api — CLAUDE.md
 
-Python 3.14 + FastAPI service for the **AI Accelerator** (the brandless starter template
+Python 3.14 + FastAPI service for the **Team Assistant** (the brandless starter template
 Orion Digital Solutions built for the Diriyah Company AI team), managed by **uv**. Port **8000**,
-trace origin **`0c70`**, OTEL service `ai-accelerator-api`. Project-wide rules and the
+trace origin **`0c70`**, OTEL service `team-assistant-api`. Project-wide rules and the
 shared `trace_id` / observability contract live in the root [CLAUDE.md](../../CLAUDE.md) and
 [README.md](../../README.md); service overview in [README.md](README.md) (this folder). Treat
 this as a starting map; read the actual files when you need detail.
@@ -41,7 +41,7 @@ this as a starting map; read the actual files when you need detail.
   **`TELEMETRY_AUTH_MODE`** (`managed_identity` → Entra ID credential; a mistyped value
   disables observability VISIBLY — rule 60 → _Ingestion auth_). See
   `.claude/rules/60-observability.md`.
-- `metrics.py` — `get_meter(scope)` (namespaced `ai-accelerator.<scope>`, no-op when degraded),
+- `metrics.py` — `get_meter(scope)` (namespaced `team-assistant.<scope>`, no-op when degraded),
   `status_class`/`resolve_target` (bounded labels), starter instruments: request-duration +
   chain-hop histograms. **Bounded attributes only** — rule 60 → _Metrics & events_.
 - `events.py` — `track_event(name, attrs)` → App Insights `customEvents` (via the
@@ -62,8 +62,13 @@ this as a starting map; read the actual files when you need detail.
   singleton**, `dispose_engine()`), `session.py` (`get_session()` FastAPI dependency — the ONLY
   way routes get a handle on the project DB), `external.py` (second lazy **read-only** engine
   for `EXTERNAL_DATABASE_URL`: `get_external_session()`, non-SELECT statements refused).
-- `models/` — 2.0-style `Mapped[]` models subclassing `app.db.Base`; **empty placeholder** today
-  (one commented example). Import new model modules in `models/__init__.py` so Alembic sees them.
+- `models/` — 2.0-style `Mapped[]` models subclassing `app.db.Base`: `conversation.py` holds `Conversation`
+  and `Message` (`docs/design/db-design.md`; thread order = `messages.seq`, an `IDENTITY` column; use
+  `Unicode()`, not `UnicodeText`, for long text — the latter renders deprecated `NTEXT` in offline DDL).
+  Import new model modules in `models/__init__.py` so Alembic sees them. **No migration exists yet**
+  (roadmap api 1.2).
+- `repositories/` — query functions taking an `AsyncSession` (`conversations.py`): ORM only, they
+  flush but never commit, and never log user content.
 - `../alembic/` + `../alembic.ini` — Alembic (async `env.py`, URL from `DATABASE_URL` via
   `app.config`, never from the ini); `versions/` is **empty** — migrations are not run.
 - `ai/` — the AI runtime (ADR-0009, rule 70): `config.py` (`AZURE_AI_*`/`AZURE_SEARCH_*`/`AI_*`),

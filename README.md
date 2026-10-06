@@ -1,37 +1,22 @@
-# AI Accelerator
+# Team Assistant
 
-> A brandless starter template that the **[Diriyah Company](https://www.diriyahcompany.sa/en/) AI team** uses to accelerate
-> the development of its AI projects. Built and maintained by **[Orion Digital Solutions](https://www.orion360.com/)** for the
-> Diriyah Company. Every project-identity string is a placeholder — clone, rename, build.
+> An internal chat assistant that answers questions from the team's own documentation, with
+> citations and conversation history. Built on the **AI Accelerator** — the
+> **[Diriyah Company](https://www.diriyahcompany.sa/en/) AI team's** starter monorepo, built and
+> maintained by **[Orion Digital Solutions](https://www.orion360.com/)**.
 
 ## Overview
 
-The AI Accelerator is exactly that — an accelerator: clone it, rename it (see
-[Using this template](#using-this-template)), and start building your AI project's features
-on a foundation that already works. It ships two wired-together services — a Next.js
-BFF + UI and a FastAPI backend that owns the database — with **end-to-end `trace_id`
-propagation** and **Azure Monitor / OpenTelemetry** observability baked into both
-services, and is designed from the start for **continuous monitoring, performance
-optimization, and measurable business impact** on **Microsoft Azure**.
+A user opens `/chat`, starts a conversation and asks a question; the answer streams back and
+cites the document it came from. Conversations and messages are stored in Azure SQL; the corpus
+is the repo's own `docs/**/*.md`, indexed in Azure AI Search. There is no login yet (internal
+only; Okta later). The features, data model and API are in
+[`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) Part B; the plan of
+record is in [`roadmaps/`](roadmaps/).
 
-## Using this template
-
-Every project-identity string in the repo is a placeholder from one family, so a new
-project renames everything in one pass:
-
-| Placeholder token    | Used for                                                      |
-| -------------------- | ------------------------------------------------------------- |
-| `AI Accelerator`     | display name — page titles, docs headings, API/OpenAPI titles |
-| `ai-accelerator`     | kebab-case slug — OTEL service names, Docker images, compose  |
-| `@ai-accelerator/*`  | npm package scope (`apps/web`)                                |
-| `ai-accelerator-api` | Python distribution name (`pyproject.toml`, `app/config.py`)  |
-
-To rename, run the **`/rename-project`** command (backed by the
-`.claude/skills/rename-project/` skill): it asks for your project's display name,
-derives the kebab-case slug (lowercase letters/digits/hyphens only — no spaces or
-special characters), replaces every token above across the repo, regenerates
-`apps/api/uv.lock`, and verifies nothing was missed. Doing it by hand? Replace the
-four token families above, then run `uv lock` in `apps/api` and rebuild.
+It runs as two wired-together services — a Next.js BFF + UI and a FastAPI backend that owns the
+database — with **end-to-end `trace_id` propagation** and **Azure Monitor / OpenTelemetry**
+observability baked into both services, on **Microsoft Azure**.
 
 ## Scope & delivery status
 
@@ -336,7 +321,7 @@ The **same code path runs locally and when deployed** — config comes from
   ([ADR-0008](docs/adr/0008-azure-sql-data-layer.md), which supersedes
   [ADR-0004](docs/adr/0004-sqlalchemy-async-alembic-db-layer.md)).
 - **Metrics & custom events (Phase 3).** `getMeter(scope)` / `get_meter(scope)`
-  returns namespaced meters (`ai-accelerator.<scope>`; silent no-op in degraded
+  returns namespaced meters (`team-assistant.<scope>`; silent no-op in degraded
   mode). Starter set: request-duration histogram (by route class + status
   class), upstream-hop duration histogram (target label set `api | other`),
   BFF upstream-failure counter. Runtime
@@ -381,7 +366,7 @@ Full contract (incl. the per-service auto-instrumentation inventory) in
   `TRACE_SAMPLING_RATIO` (0..1). The standard `OTEL_TRACES_SAMPLER` /
   `OTEL_TRACES_SAMPLER_ARG` env vars take precedence when set.
 - **Cloud role identity:** each service defaults `service.name` (→ App
-  Insights _cloud role name_: `ai-accelerator-web|api`) and
+  Insights _cloud role name_: `team-assistant-web|api`) and
   `service.instance.id` (→ _cloud role instance_: container replica name →
   `HOSTNAME` → os hostname) via the standard OTel env vars. Defaults are
   **append-only** — operator-provided `OTEL_SERVICE_NAME` /
@@ -484,7 +469,7 @@ Documented in `.env.example` (root) and `apps/<svc>/.env.example`:
 | `TRACE_SAMPLING_RATIO`                  | all       | 0..1 fixed-percentage trace sampling; empty ⇒ 1.0 (100%); `OTEL_TRACES_SAMPLER*` wins                                                                                                                      |
 | `TELEMETRY_AUTH_MODE`                   | all       | empty/`connection_string` (default) or `managed_identity` (Entra ID ingestion); a mistyped value disables observability **visibly** — no silent unauthenticated fallback                                   |
 | `TELEMETRY_MANAGED_IDENTITY_CLIENT_ID`  | all       | client id of a user-assigned managed identity (empty ⇒ system-assigned)                                                                                                                                    |
-| `OTEL_SERVICE_NAME`                     | all       | `ai-accelerator-web` / `-api` (defaulted in code; never overridden)                                                                                                                                        |
+| `OTEL_SERVICE_NAME`                     | all       | `team-assistant-web` / `-api` (defaulted in code; never overridden)                                                                                                                                        |
 | `DATABASE_URL`                          | api       | Azure SQL Database — `mssql+aioodbc://…?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no` (SQLAlchemy 2 async; lazy engine; never local)                                         |
 | `EXTERNAL_DATABASE_URL`                 | api       | optional read-only external Azure SQL database (empty ⇒ not configured)                                                                                                                                    |
 | `API_BASE_URL`                          | web (BFF) | → the FastAPI `api` service, e.g. `http://api:8000` (default `http://localhost:8000`). Same name as the former NestJS service's variable (retired in ADR-0003, reintroduced for the new `api` in ADR-0005) |
@@ -508,6 +493,3 @@ deploy locally to `dev` only; agents may only `bicep build`/`lint`. Roles the pr
 shared resources are **requested** (`infra/grant-request.md`), never assigned here. Nothing is
 deployed yet — the first `dev` deploy is a human step once the cloud team's manifests and
 building blocks are in. Everything else: [`infra/README.md`](infra/README.md).
-#   D i r i y a h _ T e m p l a t e _ V 0  
- #   D i r i y a h _ T e m p l a t e _ V 0  
- 

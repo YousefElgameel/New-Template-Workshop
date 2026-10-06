@@ -1,0 +1,193 @@
+# Roadmap — web (Team Assistant)
+
+_Frontend: pages, BFF routes, components, mocks. Schema: [`roadmaps/README.md`](../README.md).
+Planned 2026-10-06 from `docs/architecture/ARCHITECTURE.md` Part B (B2–B8), the page spec
+`docs/design/wireframes/chat.md` (+ `chat.html`) and the api roadmap
+([`roadmaps/api/ROADMAP.md`](../api/ROADMAP.md)). Decisions referenced as "decision N" are in B8._
+
+_The browser only talks to this Next server (the BFF rule); every upstream call is `/v1` through
+`fetchUpstream` / `streamUpstream`. Until an api item is `done`, the matching BFF route serves a
+`MOCK_UPSTREAM=true` fixture, so pages can be built and tested ahead of the api. The template's
+demo (`/api/v1/assistant/*`, `src/mocks/assistant.ts`, the example `/chat`) is replaced by the
+conversation surface (decision 18) — the removal is item 4.1._
+
+## Phase 1 — Foundation (contract + mocks)
+
+### 1.1 — Conversation types and mock fixtures
+
+- **status:** todo
+- **depends_on:** []
+- **layers:** [bff]
+- **acceptance:**
+  - typed shapes for the contract in B4a: conversation, conversation list item, message (with `citations: [{ title, path }]`), the JSON ask response, and the stream frames `sources` / `token` / `done` / `error` (`{ error_kind, error, trace_id }`) — hand-declared for now and marked to be swapped for the generated `api-types.ts` in 4.2
+  - fixtures (in `src/mocks/`) for: an empty list, a list of three conversations, one conversation with messages that carry citations, a created conversation, a JSON answer, a streamed answer, and a streamed failure (`error` frame)
+  - the mock helpers can pace SSE frames as the existing `mockSse` does
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-06 — planned.
+
+### 1.2 — BFF conversation routes (list, create, open)
+
+- **status:** todo
+- **depends_on:** [1.1, api:2.1]
+- **layers:** [bff]
+- **acceptance:**
+  - `GET /api/v1/conversations` → api `GET /v1/conversations` (optional `limit`, passed through only if 1–100); `POST /api/v1/conversations` → api `POST /v1/conversations` (optional title ≤ 200 characters); `GET /api/v1/conversations/[id]` → api `GET /v1/conversations/{id}`
+  - `[id]` must be a UUID, otherwise the BFF answers `400` itself and makes no upstream call (the id is placed into the upstream URL — rule 50, no unvalidated input in outbound URLs)
+  - api `404` / `422` are passed through with their body; an upstream failure is a BFF `502` with `target: 'api'` and the `trace_id`; every response echoes `x-trace-id`
+  - routes are wrapped in `withBff` (dynamic segment passed as `routeClass`), call `fetchUpstream`, and log route names and statuses only — never titles or message text
+  - with `MOCK_UPSTREAM=true` each route serves the fixtures from 1.1; works against the fixtures until api:2.1 lands
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-06 — planned.
+
+## Phase 2 — Conversation history (F2)
+
+### 2.1 — ConversationList component
+
+- **status:** todo
+- **depends_on:** [1.1]
+- **layers:** [ui]
+- **acceptance:**
+  - renders rows (title + a relative time such as "today 10:12" / "yesterday"), a selected state, a **+ New chat** button, and the empty state "No chats yet"
+  - selecting a row and pressing **+ New chat** are callbacks (the component does not fetch)
+  - keyboard accessible: rows are reachable and activatable with the keyboard, the selected row is announced
+  - long titles are truncated without breaking the layout
+  - styled with Tailwind v4 like the other chat components
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-06 — planned.
+
+### 2.2 — `/chat` page: list, new chat, reopen
+
+- **status:** todo
+- **depends_on:** [1.2, 2.1]
+- **layers:** [ui]
+- **acceptance:**
+  - `/chat` is a two-column page (conversations left, thread right, input at the bottom) as in `wireframes/chat.md`; below 768 px the list collapses into a drawer opened by a button
+  - on load it fetches `GET /api/v1/conversations` and shows the list, or "No chats yet"
+  - **+ New chat** calls `POST /api/v1/conversations`, selects the new conversation and focuses the input
+  - clicking a row calls `GET /api/v1/conversations/{id}` and shows its messages (with their citations); the input then continues that conversation
+  - list and thread each show a loading state and an error line with the `trace_id` when the BFF call fails
+  - the home page links to `/chat`
+  - works against `MOCK_UPSTREAM=true` fixtures until api:2.1 lands
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - compare the page with `docs/design/wireframes/chat.html` in a browser (desktop and a narrow window) and say what to adjust
+- **notes:**
+  - 2026-10-06 — planned. Sending a message is added in 3.3.
+
+## Phase 3 — Chat with citations (F1)
+
+### 3.1 — BFF ask routes (JSON and streaming)
+
+- **status:** todo
+- **depends_on:** [1.1, api:4.3]
+- **layers:** [bff]
+- **acceptance:**
+  - `POST /api/v1/conversations/[id]/ask` → api `POST /v1/conversations/{id}/ask`, and `POST /api/v1/conversations/[id]/ask/stream` → api `…/ask/stream` (SSE passed through unchanged with `streamUpstream` / `proxyStream`); body `{ "question": string }`
+  - `[id]` must be a UUID (else `400`, no upstream call); an empty question → `400`; the BFF does not rewrite api `404`, `413 payload_too_large` or `503 ai_unavailable` — they reach the browser with their body and `trace_id`
+  - neither the 10 s default upstream timeout nor a proxy cut the answer short: the hop timeout is set explicitly above the api's 60 s model timeout plus retries (api roadmap 4.2) and documented
+  - `x-trace-id` is on the response headers (and in the `error` frame); logs carry route and status only — never the question or answer
+  - `/v1/admin/ingest` is **not** exposed (api:3.3)
+  - with `MOCK_UPSTREAM=true` both routes serve the 1.1 fixtures, including the failure stream; works against the fixtures until api:4.3 lands
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-06 — planned. Replaces the template's `/api/v1/assistant/ask[/stream]` (removed in 4.1).
+
+### 3.2 — Streaming client and Sources block
+
+- **status:** todo
+- **depends_on:** [1.1]
+- **layers:** [ui]
+- **acceptance:**
+  - the browser streaming client handles the new frames: `sources` is `[{ title, path }]`, `done` carries `message_id` and token counts, `error` carries `error_kind`, `error` and `trace_id`; a malformed frame is skipped, never fatal; abort and network failures still call `onError` with a bounded kind
+  - the chat message type holds citations as `{ title, path }` objects and the error with its `trace_id`
+  - a `Sources` block renders under an assistant message: each citation shows the title, with the path beside it; no block when there are none
+  - the existing chat component tests are updated to the new shapes and still pass
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-06 — planned. The frame shapes come from api roadmap 4.3; adjust here if that item changes them.
+
+### 3.3 — Send a question into the open conversation
+
+- **status:** todo
+- **depends_on:** [2.2, 3.1, 3.2]
+- **layers:** [ui]
+- **acceptance:**
+  - **Send** posts the question to `/api/v1/conversations/{id}/ask/stream` for the selected conversation; the user message appears at once, **Send** is disabled while streaming, tokens appear as they arrive, and the Sources block appears as soon as the `sources` frame arrives
+  - when `done` arrives the assistant message is final and the conversation moves to the top of the list (its title updates if it was "New conversation")
+  - on an `error` frame or a failed request, a red line under the last user message shows the error code and the `trace_id`, and the input is enabled again; the question can be retried
+  - the input shows a counter ("0 / 4,000") and refuses to send an empty question or one over 4,000 characters
+  - sending with no conversation selected creates one first
+  - works against `MOCK_UPSTREAM=true` fixtures until api:4.3 lands
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - try the full flow in a browser against the mocks (new chat, ask, citations, a forced failure) and confirm the behaviour matches the wireframe states
+- **notes:**
+  - 2026-10-06 — planned.
+
+## Phase 4 — Cleanup and go-live
+
+### 4.1 — Remove the template demo
+
+- **status:** todo
+- **depends_on:** [3.3]
+- **layers:** [bff, ui]
+- **acceptance:**
+  - the template's demo is gone: `src/app/api/v1/assistant/**`, `src/mocks/assistant.ts`, the "(example)" copy and `MOCK_UPSTREAM` hint on the old `/chat` page, and any tests of them; nothing else imports them
+  - `pnpm -C apps/web typecheck`, tests and a production build pass; `apps/web/CLAUDE.md` and the docs describe the conversation routes instead
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - confirm the file deletions before they happen (deleting files is always a stop)
+- **notes:**
+  - 2026-10-06 — planned. Decision 18.
+
+### 4.2 — Switch to the generated types and turn the mocks off
+
+- **status:** todo
+- **depends_on:** [4.1, api:2.1, api:4.3]
+- **layers:** [bff]
+- **acceptance:**
+  - the hand-declared types from 1.1 are replaced by `src/lib/api-types.ts` regenerated from the api's `docs/reference/openapi.json` (`make openapi`); fixtures are typed against it and the type-check fails if the contract drifts
+  - the stream frame shapes are documented in `docs/reference/http-api.md` and the client matches them
+  - `MOCK_UPSTREAM` stays available for offline work but is off by default in `.env.example`
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - run web and api together against dev (`just dev`) with `MOCK_UPSTREAM` unset, create a conversation, ask a question and confirm an answer streams back with citations and one `trace_id` appears in both services' logs
+- **notes:**
+  - 2026-10-06 — planned. Needs api migration applied (api:1.2) and the corpus ingested (api:3.3) for a real answer.
+
+### 4.3 — Playwright smoke for `/chat`
+
+- **status:** todo
+- **depends_on:** [4.2]
+- **layers:** [ui]
+- **acceptance:**
+  - an `e2e/chat.spec.ts` smoke test: open `/chat`, start a new chat, ask a question, see an answer and at least one citation, reopen the conversation from the list
+  - it is manual/local like the existing smoke test (needs web and api up) and is documented where `test:e2e` is
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - run it locally against dev and report the result (Playwright is not part of `just test`)
+- **notes:**
+  - 2026-10-06 — planned.

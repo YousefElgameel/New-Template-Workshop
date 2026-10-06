@@ -21,7 +21,7 @@ and are **shared by every use case** built on this template (ADR-0012, decision 
   `existing`. Roles a use case needs on them are requested, not assigned
   (`infra/grant-request.md`).
 - The committed files in a fresh template are **placeholders** (`00000000-…` subscription,
-  `rg-ai-<env>`, `cae-ai-<env>`, …). `/init-project` asks you to paste the real ones; until then
+  `rg-ai-<env>`, `cae-ai-<env>`, …). paste the cloud team's real ones when you deploy; until then
   `bicep build` works but `what-if`/deploy cannot.
 
 ## Getting the values (cloud team)

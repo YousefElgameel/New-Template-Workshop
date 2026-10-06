@@ -1,5 +1,5 @@
 ---
-description: Check this machine for every tool the repo needs (git, Node 24/fnm, pnpm 11.5.2, uv + Python 3.14, Bicep CLI, az, just/make; optional Docker, gh, ODBC 18), offer to install what is missing via winget/brew/apt, and hand over numbered manual steps when an install fails. Run before /init-project on a fresh machine.
+description: Check this machine for every tool the repo needs (git, Node 24/fnm, pnpm 11.5.2, uv + Python 3.14, Bicep CLI, az, just/make; optional Docker, gh, ODBC 18), offer to install what is missing via winget/brew/apt, and hand over numbered manual steps when an install fails. Run on a fresh machine before `make install`.
 argument-hint: [check-only]
 ---
 

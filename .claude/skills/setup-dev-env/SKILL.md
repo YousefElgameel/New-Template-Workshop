@@ -1,6 +1,6 @@
 ---
 name: setup-dev-env
-description: Get a developer's machine ready for this repo in one pass — check every required tool (git, Node 24 via fnm, pnpm 11.5.2, uv + Python 3.14, Bicep CLI, az, just/make; optional Docker, gh, ODBC Driver 18) with scripts/doctor.sh, install what is missing through the OS package manager (winget / brew / apt + official installers), re-check, and when an install fails (admin rights, PATH, execution policy, proxy) hand the developer exact, numbered manual steps instead of guessing. Run on a fresh machine before /init-project or make install.
+description: Get a developer's machine ready for this repo in one pass — check every required tool (git, Node 24 via fnm, pnpm 11.5.2, uv + Python 3.14, Bicep CLI, az, just/make; optional Docker, gh, ODBC Driver 18) with scripts/doctor.sh, install what is missing through the OS package manager (winget / brew / apt + official installers), re-check, and when an install fails (admin rights, PATH, execution policy, proxy) hand the developer exact, numbered manual steps instead of guessing. Run on a fresh machine before make install.
 ---
 
 # Set up the development environment
@@ -118,5 +118,5 @@ Do not invent flags or download URLs — `docs-lookup` if unsure.
 - Install a different major version than the pins to "make it work" — fix the pins in an
   approved change instead.
 - Disable TLS verification anywhere to get past a proxy.
-- Continue into `make install` / `/init-project` while a required tool is still `MISSING` —
+- Continue into `make install` while a required tool is still `MISSING` —
   hand the manual steps over and stop.
