@@ -91,6 +91,8 @@ def _existing(session: FakeSession, title: str = DEFAULT_CONVERSATION_TITLE) -> 
         ("   \n\t ", DEFAULT_CONVERSATION_TITLE),
         ("  How does   tracing\nwork? ", "How does tracing work?"),
         ("x" * 250, "x" * 200),
+        ("\U0001f600" * 150, "\U0001f600" * 100),  # emoji are 2 UTF-16 units: 100 fill the column
+        ("a" + "\U0001f600" * 150, "a" + "\U0001f600" * 99),  # 199 units; a 100th would make 201
     ],
 )
 def test_make_title(text: str | None, expected: str) -> None:
@@ -138,14 +140,45 @@ def test_get_conversation_returns_none_for_an_unknown_id() -> None:
     assert run(repo.get_conversation(FakeSession(), uuid4())) is None
 
 
-def test_get_with_messages_orders_the_thread_by_seq() -> None:
-    session = FakeSession(rows=["m1", "m2"])
+def test_get_with_messages_returns_the_thread_oldest_first() -> None:
+    # The query is newest-first (DESC + LIMIT, so it can be bounded); the repository flips it.
+    session = FakeSession(rows=["m2", "m1"])
     conversation = _existing(session)
     found = run(repo.get_conversation_with_messages(session, conversation.id))
     assert found is not None
-    assert found[0] is conversation and found[1] == ["m1", "m2"]
+    assert found.conversation is conversation
+    assert found.messages == ["m1", "m2"] and found.truncated is False
     sql = _sql(session.statements[0])
-    assert "ORDER BY messages.seq" in sql and "messages.conversation_id" in sql
+    assert "ORDER BY messages.seq DESC" in sql and "messages.conversation_id" in sql
+    literal = str(
+        session.statements[0].compile(
+            dialect=mssql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert f"TOP {repo.MAX_THREAD_MESSAGES + 1}" in literal  # one extra row, to know about more
+
+
+def test_get_with_messages_is_bounded_and_says_when_it_cut() -> None:
+    session = FakeSession(rows=["m5", "m4", "m3", "m2"])  # limit + 1 rows came back
+    conversation = _existing(session)
+    found = run(repo.get_conversation_with_messages(session, conversation.id, limit=3))
+    assert found is not None and found.truncated is True
+    assert found.messages == ["m3", "m4", "m5"]  # the 3 newest, oldest first
+
+
+def test_get_with_messages_exactly_at_the_limit_is_not_truncated() -> None:
+    session = FakeSession(rows=["m3", "m2", "m1"])
+    conversation = _existing(session)
+    found = run(repo.get_conversation_with_messages(session, conversation.id, limit=3))
+    assert found is not None and found.truncated is False and found.messages == ["m1", "m2", "m3"]
+
+
+@pytest.mark.parametrize("limit", [0, -5])
+def test_get_with_messages_rejects_a_limit_below_one(limit: int) -> None:
+    session = FakeSession()
+    with pytest.raises(ValueError):
+        run(repo.get_conversation_with_messages(session, uuid4(), limit=limit))
+    assert session.statements == []
 
 
 def test_get_with_messages_returns_none_when_unknown() -> None:
@@ -265,3 +298,10 @@ def test_the_message_and_the_conversation_share_one_timestamp() -> None:
     conversation = _existing(session)
     message = run(repo.add_message(session, conversation.id, "assistant", "hi"))
     assert message.created_at == conversation.updated_at
+
+
+def test_a_cut_title_always_fits_the_column_and_never_splits_a_character() -> None:
+    for text in ("\U0001f600" * 300, "ab" + "\U0001f600" * 300, "\u0627\u0644" * 200, "x" * 500):
+        title = repo.make_title(text)
+        assert repo.utf16_length(title) <= 200
+        title.encode("utf-16-le")  # raises on a lone surrogate, i.e. a split character

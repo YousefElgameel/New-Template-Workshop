@@ -22,6 +22,12 @@ conversation, until Okta lands and ownership is added in a new migration.
 - Good: no fake or client-supplied user id that would look like access control but isn't.
 - Good: the simplest schema; adding `owner` later is an additive migration.
 - Bad: any user can read any other user's questions; the deployment must stay internal-only.
+- Bad: the list endpoint (`GET /v1/conversations`) exposes the ids and titles of the 100 most recent
+  conversations, and a title is the first 200 characters of someone's first question. A UUID is therefore
+  not a secret: once the list exists, unguessable ids add no protection, and the open endpoint returns
+  every message and citation.
+- Bad: creation is unauthenticated and unlimited — any caller can add rows. Acceptable only while the
+  deployment is reachable from the internal network alone; add a rate limit or ingress throttle with auth.
 - Bad: existing rows will have no owner when auth lands — a backfill or "legacy/shared" rule is
   needed then.
 - Bad: message content is personal-data-capable and kept indefinitely (no purge job); a threat

@@ -7,6 +7,32 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-06
+
+### Added
+
+- **`/v1/conversations`** (`app/routers/conversations.py`; roadmap api 2.1) — the first business endpoints:
+  - `POST /v1/conversations` (body optional, `{ "title"?: string }` ≤ 200 characters) → `201` with
+    `{ id, title, created_at, updated_at }`; a blank title becomes "New conversation".
+  - `GET /v1/conversations?limit=` (1–100, default 50) → `200` `{ items: [{ id, title, updated_at }], count }`,
+    newest first.
+  - `GET /v1/conversations/{id}` → `200` the conversation and its messages, oldest first, each with its
+    citations; `404 not_found` for an unknown id.
+  - `422 validation_error` for a bad title, an unknown field, a `limit` outside 1–100 or a malformed id. Every
+    response echoes `x-trace-id`; timestamps are UTC with a `Z`.
+  - **A read is bounded:** at most 500 messages (the most recent, oldest first) and a `truncated` flag, because
+    conversations are never purged (decision 5). The repository's `get_conversation_with_messages` now returns a
+    `Thread` and queries newest-first with a limit.
+  - Logs carry counts only — no ids, titles or message text; metrics label by the route pattern; and a new
+    `app.observability.scrub_ids_server_hook` rewrites any UUID in the request span's URL attributes
+    (`http.target`, `http.url`, `url.path`, `url.full`) to `{id}` — the FastAPI instrumentation would otherwise
+    export `GET /v1/conversations/<uuid>` into Application Insights (`tests/test_http_span_hygiene.py` proves it,
+    with a control).
+  - A title is limited to what the column holds: `NVARCHAR(200)` counts UTF-16 code units, so 100 emoji fit and
+    101 get a `422` instead of a database overflow; `make_title` cuts the same way, never splitting a character.
+    `docs/reference/openapi.json`, the web's generated `api-types.ts` and `http-api.md` are regenerated.
+  - Not exposed through the web BFF yet (roadmap web 1.2). Nothing calls `ask`: no model is involved.
+
 ## [0.4.3] — 2026-10-06
 
 ### Security

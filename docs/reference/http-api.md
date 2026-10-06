@@ -1,8 +1,9 @@
 # HTTP API reference
 
-The complete HTTP surface of both services as they exist today: **no business endpoints have
-shipped yet** — this documents the operational foundation (`/ping`, `/info`, `/health`) plus the
-two demo BFF routes in `apps/web` that exercise the `web → api` hop. Derived from the route
+The complete HTTP surface of both services as they exist today: the operational foundation
+(`/ping`, `/info`, `/health`), the first business endpoints (`/v1/conversations`), and the two demo
+BFF routes in `apps/web` that exercise the `web → api` hop. The web BFF does not mirror
+`/v1/conversations` yet (roadmap web 1.2). Derived from the route
 source, cross-checked against the test suites (`routes.test.ts`, `test_routes.py`).
 
 `apps/api` (FastAPI) is the **only backend**; it took the `api` name in
@@ -13,26 +14,28 @@ removed in [ADR-0003](../adr/0003-remove-nestjs-api-layer.md).
 
 ## Route map
 
-| Method | Path                | Service          | Purpose                                                         | Versioned?       |
-| ------ | ------------------- | ---------------- | --------------------------------------------------------------- | ---------------- |
-| GET    | `/ping`             | `apps/api`       | Liveness greeting                                               | No (operational) |
-| GET    | `/info`             | `apps/api`       | Status/version/runtime report                                   | No (operational) |
-| GET    | `/health`           | `apps/api`       | Health + observability state                                    | No (operational) |
-| GET    | `/v1/*`             | `apps/api`       | Mandatory business router — **empty**, no routes registered yet | Yes (`/v1`)      |
-| GET    | `/api/ping-backend` | `apps/web` (BFF) | Proxies `apps/api` `/ping`                                      | No (demo route)  |
-| GET    | `/api/info-backend` | `apps/web` (BFF) | Proxies `apps/api` `/info`                                      | No (demo route)  |
-| GET    | `/health`           | `apps/web` (BFF) | Own health + observability state (no upstream call)             | No (operational) |
+| Method | Path                     | Service          | Purpose                                             | Versioned?       |
+| ------ | ------------------------ | ---------------- | --------------------------------------------------- | ---------------- |
+| GET    | `/ping`                  | `apps/api`       | Liveness greeting                                   | No (operational) |
+| GET    | `/info`                  | `apps/api`       | Status/version/runtime report                       | No (operational) |
+| GET    | `/health`                | `apps/api`       | Health + observability state                        | No (operational) |
+| POST   | `/v1/conversations`      | `apps/api`       | Start a conversation                                | Yes (`/v1`)      |
+| GET    | `/v1/conversations`      | `apps/api`       | List conversations, newest first                    | Yes (`/v1`)      |
+| GET    | `/v1/conversations/{id}` | `apps/api`       | Open a conversation with its messages               | Yes (`/v1`)      |
+| GET    | `/api/ping-backend`      | `apps/web` (BFF) | Proxies `apps/api` `/ping`                          | No (demo route)  |
+| GET    | `/api/info-backend`      | `apps/web` (BFF) | Proxies `apps/api` `/info`                          | No (demo route)  |
+| GET    | `/health`                | `apps/web` (BFF) | Own health + observability state (no upstream call) | No (operational) |
 
-Business endpoints, when they arrive, are `/v1/<feature>` on the api (routers attached to
-`v1_router`) and `/api/v1/<feature>` on web (folder-enforced). See [Versioning](#versioning).
+Business endpoints are `/v1/<feature>` on the api (routers attached to `v1_router`) and
+`/api/v1/<feature>` on web (folder-enforced). See [Versioning](#versioning).
 
 ---
 
 ## `apps/api` — FastAPI (port 8000, origin `0c70`)
 
 Source: `apps/api/app/routes.py` (operational router, mounted at root by `app/main.py`).
-`app/routers/v1.py` defines `v1_router` (`prefix="/v1"`) but **no feature router is attached
-yet** — `/v1/*` currently 404s.
+`app/routers/v1.py` defines `v1_router` (`prefix="/v1"`); `app/routers/conversations.py` is attached
+to it (`/v1/conversations`).
 
 ### `GET /ping`
 
@@ -104,6 +107,67 @@ Field notes (`apps/api/app/routes.py`):
 state, not database health. **The database is never queried here**: the SQLAlchemy engine is
 lazy and the baseline issues no queries, so `/health` is green with the placeholder
 `DATABASE_URL`.
+
+### `/v1/conversations` — start, list and open a conversation
+
+Source: `apps/api/app/routers/conversations.py` (roadmap api 2.1). Conversations are **shared** — no
+owner, any user of the internal deployment can read any of them ([ADR-0014](../adr/0014-shared-conversations-until-auth.md)).
+Every response echoes `x-trace-id`; every non-2xx body is `{ "error", "trace_id" }`. Timestamps are ISO-8601 UTC
+with a `Z`.
+
+**`POST /v1/conversations`** — body optional: `{ "title"?: string }` (≤ 200 characters).
+
+```json
+{
+  "id": "5b1f…",
+  "title": "New conversation",
+  "created_at": "2026-10-06T10:00:00.123Z",
+  "updated_at": "2026-10-06T10:00:00.123Z"
+}
+```
+
+`201`. A blank or missing title becomes `"New conversation"`, replaced by the first question once one is
+asked. `422 validation_error` for a title longer than the column (200 UTF-16 code units: an emoji counts as 2, so
+100 fit), a non-string title, an unknown field or a malformed JSON body. **Cap the request body at the ingress or
+the BFF** (a few KB is plenty here): the api itself reads the whole body before validating it.
+
+**`GET /v1/conversations?limit=50`** — newest first by `updated_at`; `limit` is 1–100 (default 50).
+
+```json
+{
+  "items": [{ "id": "5b1f…", "title": "Trace ids", "updated_at": "2026-10-06T10:12:00.000Z" }],
+  "count": 1
+}
+```
+
+`count` is the number of items returned, not a total. `422 validation_error` for a `limit` outside 1–100 or
+not an integer. There is no cursor yet (decision 15): page by lowering the limit.
+
+**`GET /v1/conversations/{id}`** — the conversation and its messages, **oldest first**.
+
+```json
+{
+  "id": "5b1f…",
+  "title": "Trace ids",
+  "created_at": "…",
+  "updated_at": "…",
+  "truncated": false,
+  "messages": [
+    { "id": "…", "role": "user", "content": "…", "citations": null, "created_at": "…" },
+    {
+      "id": "…",
+      "role": "assistant",
+      "content": "…",
+      "citations": [{ "title": "…", "path": "docs/a.md" }],
+      "created_at": "…"
+    }
+  ]
+}
+```
+
+A read never returns more than **500** messages: when a conversation holds more, only the most recent 500 are
+returned (still oldest first) and `truncated` is `true`. `404 not_found` for an unknown id; `422` for an id that
+is not a UUID.
 
 ---
 

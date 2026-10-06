@@ -153,7 +153,7 @@ need a human with access._
 
 ### 2.1 — Create, list and open conversations
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [1.1, 1.3]
 - **layers:** [endpoint]
 - **acceptance:**
@@ -165,12 +165,35 @@ need a human with access._
   - `docs/reference/openapi.json` and `http-api.md` regenerated
   - works against fake sessions; against the dev database once 1.2 is applied
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `just test` (or `uv run --directory apps/api pytest`) — expect **346 passed** in api (288 before; 58 new across `tests/test_conversations_api.py`, `tests/test_http_span_hygiene.py` and `tests/test_repositories_conversations.py`) and web unchanged at 136
+  - `uv run --directory apps/api ruff check app tests alembic` — `All checks passed!`; `pnpm -C apps/web typecheck` — clean (the web's generated `api-types.ts` changed)
+  - the contract: `just openapi` — expect no further diff; `docs/reference/openapi.json` lists the three routes
+  - **live check against the dev database** (optional, yours — it writes rows to the database `Alembic target:` showed). Terminal 1: `uv run --directory apps/api uvicorn app.main:app --port 8000` (loads `apps/api/.env`). Terminal 2 (PowerShell):
+    ```
+    $c = Invoke-RestMethod -Method Post -Uri http://localhost:8000/v1/conversations -ContentType application/json -Body '{"title":"smoke test"}' -ResponseHeadersVariable h
+    $c; $h["x-trace-id"]                                   # 201 body {id,title,created_at,updated_at}; a 32-hex trace id
+    Invoke-RestMethod http://localhost:8000/v1/conversations                 # items newest first, count
+    Invoke-RestMethod "http://localhost:8000/v1/conversations/$($c.id)"      # messages = [], truncated = False
+    Invoke-RestMethod "http://localhost:8000/v1/conversations/$([guid]::NewGuid())"   # 404 {"error":"not_found","trace_id":...}
+    Invoke-RestMethod "http://localhost:8000/v1/conversations?limit=0"       # 422 {"error":"validation_error",...}
+    ```
+    There is no delete endpoint (out of scope, decision 6), so the smoke-test row stays; remove it in the database if you want it gone.
+  - prove the tests bite: in `app/observability.py` make the scrub in `scrub_ids_server_hook` a no-op (2 span tests fail), or in `app/routers/conversations.py` make `_fits_the_title_column` never raise (the emoji-title test fails) — I did both and restored them
 - **needs_human:**
-  - none (a live check needs 1.2 applied)
+  - optional: the live check above (the migration is applied, so it works now)
+  - cap request bodies at the ingress or in the BFF — the api reads a whole body before validating it (the web roadmap's BFF items are the place; I do not edit another layer's roadmap)
+  - reply **done** to close the item, or tell me what to change
 - **notes:**
   - 2026-10-06 — planned. The web roadmap should `depends_on: [api:2.1]` and use `MOCK_UPSTREAM` fixtures until then.
   - 2026-10-06 — `depends_on` gained 1.3 after the 1.1 security review. Also bound the thread read: `GET /v1/conversations/{id}` must not return an unbounded number of messages (cap or paginate it), and conversation ids and titles must stay out of logs, spans and metric attributes.
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — implemented; awaiting test by Yousef Wahid. Files: `app/routers/conversations.py` (new) and `v1.py`, `app/repositories/conversations.py` (bounded read, `Thread`, UTF-16 titles), `app/observability.py` (`scrub_ids_server_hook`), the three test files, `docs/reference/openapi.json` + the web's generated `api-types.ts` (`just openapi`), `docs/reference/http-api.md`, `apps/api/CLAUDE.md`, `CHANGELOG.md` + `pyproject.toml` + `uv.lock` (0.5.0), `.claude/rules/60-observability.md`, ADR-0014 (consequences). Reviews: `code-reviewer` and `security-reviewer`, no CRITICAL/HIGH; every finding below was verified or fixed.
+  - 2026-10-06 — decisions made here, for the record: (1) `GET /{id}` returns at most **500** messages — the most recent, oldest first — plus `truncated: bool`; (2) timestamps are returned as UTC with a `Z`; (3) a title is limited to the column's **UTF-16 units** (100 emoji fit, 101 → `422`), because a code-point limit let 150 emoji overflow `NVARCHAR(200)` into a 500; (4) the POST body is optional and `extra="forbid"`.
+  - 2026-10-06 — PROPOSED edit to `ARCHITECTURE.md` B4a (the team applies it): `GET /v1/conversations/{id}` → `200` conversation + `messages` (oldest first, at most 500) + `truncated`.
+  - 2026-10-06 — found by the reviews and fixed: the **conversation id was on the request span** — the FastAPI instrumentation exports the concrete target (`http.target`, `http.url`), and my first docstring claimed otherwise. A control test shows the id on the span without the hook and gone with `scrub_ids_server_hook`. Also fixed: the title overflow, a monkeypatch in my test that did nothing (the router now passes the cap at call time), a logging test that could pass vacuously (it now requires the endpoints' own log events), and a stale sentence in `http-api.md`.
+  - 2026-10-06 — NOT done here, carried forward: validate `citations` on insert in 4.2/4.3 (valid JSON of the wrong shape makes that conversation's `GET` a permanent clean 500 — a test pins the clean 500); cap message `content` size on write (4.2 limits the question to 4,000 characters; an answer is bounded by the model) because a read is bounded by count, not bytes; a rate limit on `POST` once auth lands (ADR-0014 now says so); body-size cap at the ingress/BFF. The list endpoint exposes all ids and titles — recorded in ADR-0014.
+  - 2026-10-06 — version 0.5.0 (MINOR: new endpoints, backward compatible).
+  - 2026-10-06 — confirmed by Yousef Wahid; closed.
 
 ## Phase 3 — Knowledge base (F3)
 

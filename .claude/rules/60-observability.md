@@ -141,6 +141,11 @@ The structured stdout line is the source of truth; export is a **tee**, never a 
   (`engine=`): the instrumentor's singleton guard would silently skip the second engine. Decision
   - trade-offs: [ADR-0008](../../docs/adr/0008-azure-sql-data-layer.md) (supersedes ADR-0004's
     driver-level approach).
+- **No resource ids on the request span.** The FastAPI instrumentation records the concrete request target
+  (`http.target`, `http.url`; `url.path`/`url.full` under the stable conventions), so `GET /v1/conversations/<uuid>`
+  would export the id even though `http.route` and the metrics use the pattern. `scrub_ids_server_hook`
+  (`app/observability.py`, passed as `server_request_hook`) rewrites UUIDs in those attributes to `{id}`. Any new
+  id-bearing route is covered if its ids are UUIDs; anything else needs its own scrub.
 - **No driver text on DB spans.** The instrumentor's own hooks would put SQL Server's raw message (which can
   quote user content) on the span: `handle_error` as the status description of a failed statement, and the
   `connect` span as an exception event + status of a failed connection. `hide_driver_error_text`

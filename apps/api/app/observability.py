@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import socket
 from typing import Any
 
@@ -169,12 +170,43 @@ def apply_resource_defaults() -> None:
         )
 
 
+# A UUID anywhere in a string (the only kind of id this api puts in a URL path).
+_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+# The server span's raw-request attributes: the old and the stable HTTP semantic conventions.
+_SPAN_URL_ATTRIBUTES = ("http.target", "http.url", "url.path", "url.full")
+
+
+def scrub_ids_server_hook(span: Any, scope: Any) -> None:
+    """FastAPI instrumentation ``server_request_hook``: keep resource ids off the request span.
+
+    The instrumentation records the CONCRETE request target on the server span (``http.target``,
+    ``http.url``, and ``url.path``/``url.full`` under the stable conventions), so
+    ``GET /v1/conversations/<uuid>`` would put the conversation id into Application Insights
+    (``AppRequests.Url``) even though ``http.route`` and every metric use the pattern. This
+    hook runs after those attributes are set and rewrites any UUID in them to ``{id}``. Conversation
+    ids are the identifiers of shared, personal-data-capable content (ADR-0014).
+    Fail-safe: it can never break a request.
+    """
+    try:
+        if not span.is_recording():
+            return
+        attributes = span.attributes or {}
+        for key in _SPAN_URL_ATTRIBUTES:
+            value = attributes.get(key)
+            if isinstance(value, str) and _UUID_RE.search(value):
+                span.set_attribute(key, _UUID_RE.sub("{id}", value))
+    except Exception:  # noqa: BLE001 — telemetry must never fail a request
+        return
+
+
 def _instrument_fastapi(app: Any, log: Any) -> None:
     """Explicitly instrument the FastAPI app (best-effort, per-app guard)."""
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        FastAPIInstrumentor.instrument_app(app)
+        FastAPIInstrumentor.instrument_app(app, server_request_hook=scrub_ids_server_hook)
     except Exception as exc:  # noqa: BLE001
         log.warning("fastapi instrumentation failed", error=str(exc))
 
