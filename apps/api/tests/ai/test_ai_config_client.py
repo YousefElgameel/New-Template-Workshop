@@ -17,6 +17,7 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch):
         "AZURE_AI_DEPLOYMENT",
         "AZURE_AI_EMBEDDING_DEPLOYMENT",
         "AZURE_AI_EMBEDDING_DIMENSIONS",
+        "CORPUS_DIR",
         "AZURE_AI_API_VERSION",
         "AZURE_AI_AUTH_MODE",
         "AZURE_AI_API_KEY",
@@ -42,6 +43,7 @@ class TestSettings:
         assert s.max_retries == 2
         assert s.embedding_dimensions == 1536
         assert s.allow_text_to_sql is False
+        assert s.corpus_dir is None
 
     def test_require_raises_clear_errors(self) -> None:
         s = get_ai_settings()

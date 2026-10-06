@@ -28,6 +28,7 @@ from app.logging_config import get_logger
 ID_FIELD = "id"
 CONTENT_FIELD = "content"
 SOURCE_FIELD = "source"
+TITLE_FIELD = "title"
 VECTOR_FIELD = "content_vector"
 DEFAULT_TOP_K = 5
 
@@ -36,6 +37,7 @@ class RetrievedChunk(TypedDict):
     id: str
     content: str
     source: str
+    title: str
     score: float | None
 
 
@@ -87,6 +89,7 @@ class AzureSearchRetriever:
         id_field: str = ID_FIELD,
         content_field: str = CONTENT_FIELD,
         source_field: str = SOURCE_FIELD,
+        title_field: str = TITLE_FIELD,
         vector_field: str = VECTOR_FIELD,
     ) -> None:
         self._client = search_client
@@ -94,6 +97,7 @@ class AzureSearchRetriever:
         self._id_field = id_field
         self._content_field = content_field
         self._source_field = source_field
+        self._title_field = title_field
         self._vector_field = vector_field
 
     def _search(self, query: str, vector: list[float], top_k: int) -> list[dict[str, Any]]:
@@ -104,7 +108,12 @@ class AzureSearchRetriever:
             vector_queries=[
                 VectorizedQuery(vector=vector, k_nearest_neighbors=top_k, fields=self._vector_field)
             ],
-            select=[self._id_field, self._content_field, self._source_field],
+            select=[
+                self._id_field,
+                self._content_field,
+                self._source_field,
+                self._title_field,
+            ],
             top=top_k,
         )
         return [dict(r) for r in results]
@@ -122,6 +131,7 @@ class AzureSearchRetriever:
                 "id": str(r.get(self._id_field, "")),
                 "content": str(r.get(self._content_field, "")),
                 "source": str(r.get(self._source_field, "")),
+                "title": str(r.get(self._title_field) or ""),
                 "score": r.get("@search.score"),
             }
             for r in raw

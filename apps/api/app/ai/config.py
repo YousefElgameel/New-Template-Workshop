@@ -67,6 +67,8 @@ class AISettings:
     request_timeout_seconds: float
     max_retries: int
     allow_text_to_sql: bool
+    # Directory of the `.md` corpus to ingest; None = the repository's docs/ (decision 1).
+    corpus_dir: str | None = None
 
     @property
     def has_model(self) -> bool:
@@ -134,4 +136,5 @@ def get_ai_settings() -> AISettings:
         request_timeout_seconds=_float_env("AI_REQUEST_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS),
         max_retries=max(0, max_retries),
         allow_text_to_sql=_bool_env("AI_ALLOW_TEXT_TO_SQL"),
+        corpus_dir=_env("CORPUS_DIR"),
     )

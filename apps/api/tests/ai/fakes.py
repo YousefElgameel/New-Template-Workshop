@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from azure.core.exceptions import ResourceNotFoundError
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
@@ -112,3 +113,27 @@ def fake_session_factory(session: FakeSession) -> Any:
         return lambda: session
 
     return factory
+
+
+class FakeIndexClient:
+    """Stands in for ``SearchIndexClient``: ``existing`` is what ``get_index`` returns, or
+    ``None`` for "no such index". Records the indexes it was asked to create or update."""
+
+    def __init__(self, existing: Any | None = None) -> None:
+        self.existing = existing
+        self.get_calls: list[str] = []
+        self.created: list[Any] = []
+        self.deleted: list[str] = []
+
+    def get_index(self, name: str) -> Any:
+        self.get_calls.append(name)
+        if self.existing is None:
+            raise ResourceNotFoundError(f"index {name} not found")
+        return self.existing
+
+    def create_or_update_index(self, index: Any) -> Any:
+        self.created.append(index)
+        return index
+
+    def delete_index(self, name: str) -> None:
+        self.deleted.append(name)

@@ -7,6 +7,47 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-06
+
+### Added
+
+- **Document titles in the index** (`app/ai/ingest.py`, `app/ai/tools/retrieve.py`; roadmap api 3.2): every chunk
+  stores its `source` (`docs/<path>`) and a `title` — the document's first top-level `# ` heading (outside code
+  fences of any length and outside front matter; `# C#` keeps its `#`; a byte-order mark is ignored), else the file
+  name. Titles are one line of printable text, at most 200 characters; control characters become spaces. Retrieval
+  returns both (`RetrievedChunk.title`), and the index gains a searchable `title` field.
+- **`CORPUS_DIR`** (`app/ai/config.py`): the directory of the `.md` corpus; empty means the repository's `docs/`,
+  `/app/corpus` in the image. A document's `source` is `docs/<path inside it>` wherever the corpus lives.
+- **Vector-size guards** for ingestion. Each stops the run with a message naming both numbers:
+  - an existing index whose vector size differs from `AZURE_AI_EMBEDDING_DIMENSIONS` is left **unchanged**; so is an
+    existing index that has no `content_vector` field. Ingestion never deletes or recreates an index;
+  - an embedding deployment that returns vectors of another size is caught by a constant probe **before** the index is
+    touched, and again on every batch before it is uploaded (a batch after the first could in theory still fail
+    after earlier batches were uploaded; re-run after fixing the setting — uploads are idempotent).
+- `python -m app.ai.ingest` prints a one-line reason and exits `2` — instead of a traceback — for these stops: a
+  missing or empty corpus, a file that is not valid UTF-8, a vector-size mismatch, and a missing AI/search setting.
+  Other failures (a network or Azure error) still show their traceback.
+- The ingestion log and report now include the run time in seconds (still counts only: no document text, no paths).
+
+### Changed
+
+- **Ingestion reads `.md` files only** (decision 14); `.txt` is no longer accepted. The command takes an optional
+  `--corpus DIR` instead of a path argument, and an empty or missing corpus is an error. Files are read in a
+  deterministic order (by relative path, case-sensitive), the same on Windows and Linux. A `.md` file that is not
+  valid UTF-8 now stops the run, naming the file, instead of being read with replacement characters.
+- `apps/api/.env.example` sets `AZURE_AI_EMBEDDING_DIMENSIONS=3072` for the Team Assistant (the code default stays
+  `1536`).
+
+### Upgrade notes
+
+- **Run the ingestion before using this version for retrieval.** The retriever now asks the index for `title`; an
+  index that lacks the field makes retrieval fail until the ingestion has updated it (the ingestion adds the field).
+  Nothing in the api calls retrieval yet, so today this only matters for the first ingestion and for api 4.2.
+- A `source` used to be whatever path was passed on the command line. Chunks ingested earlier under another path form
+  keep their old ids and would sit next to the new ones as duplicates; if the index was ever ingested before this
+  version, its owner should delete it and let the ingestion rebuild it (stale-chunk removal is api 3.5).
+- An index built before this release at another vector size must also be deleted by its owner first.
+
 ## [0.5.1] — 2026-10-06
 
 ### Changed

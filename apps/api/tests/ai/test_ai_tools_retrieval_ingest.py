@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
 import pytest
 
@@ -24,6 +23,7 @@ from app.ai.tools.retrieve import (
     CONTENT_FIELD,
     ID_FIELD,
     SOURCE_FIELD,
+    TITLE_FIELD,
     VECTOR_FIELD,
     AzureSearchRetriever,
     NullRetriever,
@@ -124,16 +124,26 @@ def test_null_retriever_returns_nothing() -> None:
 
 def test_azure_search_retriever_runs_hybrid_query() -> None:
     client = FakeSearchClient(
-        rows=[{ID_FIELD: "a", CONTENT_FIELD: "text a", SOURCE_FIELD: "s1", "@search.score": 1.5}]
+        rows=[
+            {
+                ID_FIELD: "a",
+                CONTENT_FIELD: "text a",
+                SOURCE_FIELD: "s1",
+                TITLE_FIELD: "Title A",
+                "@search.score": 1.5,
+            }
+        ]
     )
     embeddings = FakeEmbeddings(dimensions=3)
     retriever = AzureSearchRetriever(client, embeddings)
     chunks = asyncio.run(retriever.retrieve("hello", top_k=3))
-    assert chunks == [{"id": "a", "content": "text a", "source": "s1", "score": 1.5}]
+    assert chunks == [
+        {"id": "a", "content": "text a", "source": "s1", "title": "Title A", "score": 1.5}
+    ]
     assert embeddings.queries == ["hello"]
     call = client.search_calls[0]
     assert call["search_text"] == "hello" and call["top"] == 3
-    assert call["select"] == [ID_FIELD, CONTENT_FIELD, SOURCE_FIELD]
+    assert call["select"] == [ID_FIELD, CONTENT_FIELD, SOURCE_FIELD, TITLE_FIELD]
     vq = call["vector_queries"][0]
     assert (
         vq.fields == VECTOR_FIELD and vq.k_nearest_neighbors == 3 and vq.vector == [5.0, 0.0, 0.0]
@@ -156,6 +166,7 @@ def test_build_index_matches_the_retriever_contract() -> None:
     names = {f.name: f for f in index.fields}
     assert names[ID_FIELD].key is True
     assert names[CONTENT_FIELD].searchable is True
+    assert names[TITLE_FIELD].searchable is True
     assert names[VECTOR_FIELD].vector_search_dimensions == 8
     assert names[VECTOR_FIELD].vector_search_profile_name == ingest.VECTOR_PROFILE
     assert index.vector_search.profiles[0].algorithm_configuration_name == ingest.HNSW_CONFIG
@@ -182,17 +193,10 @@ def test_ingest_documents_embeds_and_uploads_in_batches() -> None:
         ID_FIELD,
         CONTENT_FIELD,
         SOURCE_FIELD,
+        TITLE_FIELD,
         ingest.CHUNK_INDEX_FIELD,
         VECTOR_FIELD,
     }
     assert first[ID_FIELD] == ingest.chunk_id("a.md", 0)
+    assert first[TITLE_FIELD] == "a.md"  # no title given: the file name
     assert len(first[VECTOR_FIELD]) == 2
-
-
-def test_load_path_reads_text_files_only(tmp_path: Path) -> None:
-    (tmp_path / "a.md").write_text("alpha", encoding="utf-8")
-    (tmp_path / "b.txt").write_text("beta", encoding="utf-8")
-    (tmp_path / "c.bin").write_bytes(b"\x00")
-    docs = ingest.load_path(tmp_path)
-    assert [d.text for d in docs] == ["alpha", "beta"]
-    assert ingest.load_path(tmp_path / "a.md")[0].source.endswith("a.md")

@@ -60,7 +60,7 @@ apps/api/app/routers/<feature>.py             # as target ai, with retriever=get
 ```
 
 - The index definition lives in `app/ai/ingest.py` (`build_index`) — extend it there, never ad hoc, and keep `tools/retrieve.py` field names in sync.
-- Ingestion is a human-triggered job: `uv run --directory apps/api python -m app.ai.ingest <path>` with `AZURE_SEARCH_*` + `AZURE_AI_EMBEDDING_*` set (needs _Search Index Data Contributor_ + _Search Service Contributor_). Bicep's `ai-search` module grants the api identity those roles; a dev key works locally.
+- Ingestion is a human-triggered job: `uv run --directory apps/api python -m app.ai.ingest [--corpus DIR]` with `AZURE_SEARCH_*` + `AZURE_AI_EMBEDDING_*` set (needs _Search Index Data Contributor_ + _Search Service Contributor_). Bicep's `ai-search` module grants the api identity those roles; a dev key works locally.
 - `AZURE_AI_EMBEDDING_DIMENSIONS` must match the deployment (1536 small / 3072 large) or the index build fails.
 
 ## After scaffolding (any target)

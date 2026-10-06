@@ -92,13 +92,20 @@ the search index and an embedding deployment are configured, otherwise `NullRetr
 graph still answers, with an empty context.
 
 **`ingest.py`.** The RAG ingestion job owns the index definition (`build_index`: `id`,
-`content`, `source`, `chunk_index`, `content_vector` with an HNSW profile sized by
-`AZURE_AI_EMBEDDING_DIMENSIONS`) so the retriever and the index cannot drift. `ensure_index` is
-idempotent; `ingest_documents` chunks (fixed windows with overlap), embeds in batches and
-uploads with stable ids (re-ingesting a source overwrites its chunks). Run it from `apps/api`:
-`uv run python -m app.ai.ingest ./docs`. The identity needs _Search Index Data Contributor_ +
-_Search Service Contributor_ (granted to the api identity by the `ai-search` module; a dev key
-works locally).
+`content`, `source`, `title`, `chunk_index`, `content_vector` with an HNSW profile sized by
+`AZURE_AI_EMBEDDING_DIMENSIONS`) so the retriever and the index cannot drift. The corpus is every
+`.md` file under `CORPUS_DIR` (default: the repository's `docs/`; `/app/corpus` in the image,
+ADR-0013); a document's `source` is always `docs/<path inside the corpus>` and its `title` is its
+first top-level `# ` heading outside code fences, else the file name, carried by every chunk and
+returned by retrieval. `ensure_index` creates the index or updates it in place, and **refuses**
+an existing index whose vector size differs from the configured one (it never deletes or
+recreates an index — its owner does); before it touches the index the job also embeds a constant
+probe and stops if the deployment's vectors have another size. `ingest_documents` chunks (fixed
+windows with overlap), embeds in batches and uploads with stable ids (re-ingesting a source
+overwrites its chunks); it logs counts and seconds, never text. Run it from `apps/api`:
+`uv run python -m app.ai.ingest [--corpus DIR]`. The identity needs _Search Index Data
+Contributor_ + _Search Service Contributor_ (granted to the api identity by the `ai-search`
+module; a dev key works locally).
 
 **`prompts/`.** Prompts are files. `load_prompt("system")` reads `prompts/system.md`;
 `render_prompt` fills `{placeholders}` and fails loudly on a missing one. The shipped system

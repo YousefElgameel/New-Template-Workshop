@@ -223,7 +223,7 @@ need a human with access._
 
 ### 3.2 — Ingestion with titles at 3072 dimensions
 
-- **status:** todo
+- **status:** done
 - **depends_on:** []
 - **layers:** [ai]
 - **acceptance:**
@@ -233,17 +233,24 @@ need a human with access._
   - ingestion stays idempotent and logs counts and durations only, never document text
   - covered with fake search and embedding clients — no live service
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `cd apps/api && uv run pytest tests/ai` → all green; the whole suite `uv run pytest` → 415 passed; `uv run ruff check app tests alembic` clean (on Windows, `uv` may need to be on `PATH`)
+  - dry look at the corpus without Azure: `cd apps/api && uv run python -c "from app.ai import ingest; d = ingest.load_corpus(ingest.default_corpus_dir()); print(len(d), d[0].source, '|', d[0].title)"` → a count above 0 and a `docs/…` source with a real heading as the title
+  - with `AZURE_AI_EMBEDDING_DIMENSIONS` set to a value that does not match your deployment, `uv run python -m app.ai.ingest` prints `ingest stopped: the embedding deployment returns vectors of N dimensions, but AZURE_AI_EMBEDDING_DIMENSIONS is M …`, exits `2`, and the index is not touched (needs the Azure settings, so it is part of the human step below)
 - **needs_human:**
   - if `team-assistant-docs` already exists at another dimension, its owner deletes it (the agent never deletes the index)
   - confirm the project `.env` has `AZURE_AI_EMBEDDING_DIMENSIONS=3072`
+  - before the first real ingestion: if `team-assistant-docs` was ever ingested with an earlier version of this job, its owner deletes it so it is rebuilt cleanly (old chunks keep their old ids and would duplicate)
+  - run the first ingestion yourself once the Azure settings are in `apps/api/.env` — `uv run python -m app.ai.ingest` — and check the index has documents with a `title` (the endpoint that does this over HTTP is item 3.3)
 - **notes:**
   - 2026-10-06 — planned. Uses `feature-scaffold` target `rag`.
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — implemented by Claude. Files: `app/ai/ingest.py` (corpus loader, titles, dimension guards, exit codes), `app/ai/tools/retrieve.py` (`title`), `app/ai/config.py` (`CORPUS_DIR`), tests `tests/ai/test_ai_ingest_corpus.py` + updated ones + `FakeIndexClient`, `.env.example`, `environment-variables.md`, `docs/architecture/ai.md`, api `CLAUDE.md`/`README.md`, `.claude/rules/70-ai.md`, the `feature-scaffold` skill (CLI text only), CHANGELOG, api 0.6.0. Reviews: code-reviewer (4 should-fix: all applied — rollout/upgrade notes, honest exit-code and dimension wording, `Nothing was uploaded` reworded, BOM/fence-length/tab handling) and security-reviewer (no critical or high; applied: file-name fallback sanitised, index without a vector field refused, invalid UTF-8 fails the run instead of being replaced). Mutation-checked: 17 mutations, all caught. Not done here by design (item 3.5): symlink and outside-root checks, stale-chunk removal, ingest-call timeouts, hidden-character stripping. Not changed: embedding calls are not wrapped in `model_call_span()` — retrieval already behaves the same; say if you want rule 70 applied to the job.
+  - 2026-10-06 — confirmed by Yousef Wahid. The first real ingestion against Azure has not been run yet (needs `AZURE_*` in `apps/api/.env`).
 
 ### 3.3 — Ingest endpoint
 
 - **status:** todo
-- **depends_on:** [3.1, 3.2]
+- **depends_on:** [3.1, 3.2, 3.5]
 - **layers:** [endpoint, ai]
 - **acceptance:**
   - `POST /v1/admin/ingest` with the right `x-admin-key` → `202 { "status": "started" }` and ingestion runs in the background (the corpus from 3.2)
@@ -252,14 +259,21 @@ need a human with access._
   - the outcome (counts, duration, success or error kind) is logged and emitted as a bounded event; no document text
   - the route is `/v1`-prefixed, echoes `x-trace-id`, and is **not** exposed through the web BFF
   - `INGEST_ADMIN_KEY` has a placeholder entry in `apps/api/.env.example` and `docs/reference/environment-variables.md`
+  - an `INGEST_ADMIN_KEY` shorter than 32 characters is treated as not set (`401`, fails closed) and logs one warning naming only the reason kind, never the key or its length
+  - `x-admin-key`, `admin_key` and `ingest_admin_key` are on the log redaction list, with a test that a log line carrying each shows `[redacted]`
+  - `docs/operations/runbooks/` has a short procedure to rotate the key (set the new value, restart, check the old key now gets `401`)
+  - an unexpected failure of the background run is reported by a bounded error kind in the log and the outcome event, never by the exception text (which can carry service URLs or response bodies)
 - **how_to_test:**
   - _(filled in by `/implement-next`)_
 - **needs_human:**
   - set a real `INGEST_ADMIN_KEY` in your own `.env` (and Key Vault when deployed)
   - run the first ingestion against dev (`curl -X POST -H "x-admin-key: …" localhost:8000/v1/admin/ingest`) and check the index is populated
   - accept ADR-0015
+  - decide whether the runtime and the ingest job use separate Search identities (threat model G13: runtime = Search Index Data Reader, ingest = Contributor); if yes, an entry for the cloud team in `infra/grant-request.md`
 - **notes:**
   - 2026-10-06 — planned. Delegate to `observability-instrumenter` for the event.
+  - 2026-10-06 — from the api 3.1 threat model (S5, G8, G13): key hardening and the redaction entries added to acceptance; now also depends on 3.5 (ingest hygiene). The 32-character minimum is a default chosen here — change it if the team prefers another.
+  - 2026-10-06 — from the api 3.2 security review: the CLI prints a traceback for unexpected errors, which is fine for a person at a terminal; the endpoint must not.
 
 ### 3.4 — Corpus baked into the api image
 
@@ -270,13 +284,39 @@ need a human with access._
   - the api image contains the repo's `docs/**/*.md` at `/app/corpus` and the ingest endpoint reads it there when `APP_ENV` is not `local`
   - the build works with the image's real build context (the api image is built from `apps/api`, while `docs/` is at the repo root — adjust the context, `.dockerignore` and `docker-compose.yml` together)
   - the final image still runs as a non-root user, and `.env*` stays out of the image
+  - before the corpus is copied into the image, a check fails the build when a corpus file contains a secret-looking string (`AKIA…`, `sk-…`, `ghp_…`, `eyJ…`, a private-key header); it prints the file name and the pattern kind, never the matched text
 - **how_to_test:**
   - _(filled in by `/implement-next`)_
 - **needs_human:**
   - build the image with Docker (not installed on this machine today; optional tool) or let CI build it — pushing an image is always a human step
   - accept ADR-0013
+  - review whether the corpus scope is right (decision 14: `docs/**/*.md`, including the template's own docs) — the whole corpus becomes searchable by everyone who can use the chat (threat model G7)
 - **notes:**
   - 2026-10-06 — planned. Not needed for local runs; only for a deployed container.
+  - 2026-10-06 — from the api 3.1 threat model (G7): secret scan and corpus-scope review added.
+
+### 3.5 — Ingest hygiene (paths, sources, stale chunks, timeouts)
+
+- **status:** todo
+- **depends_on:** [3.2]
+- **layers:** [ai]
+- **acceptance:**
+  - every candidate path is resolved first; a path that resolves outside the corpus root (a symlink, `..`) is skipped and counted, never read
+  - only `.md` files are read — `.txt` is no longer accepted (decision 14)
+  - each chunk's `source` is the repo-relative path with `/` separators (`docs/…`); it is never absolute and never contains a newline
+  - after a run that completes, chunks whose source file is no longer in the corpus are removed from the index (only chunks of this index, selected by source) and counted; a run that fails part-way removes nothing
+  - the embedding and search calls of ingestion each have an explicit timeout (default 30 s, from config), so one hung call cannot hold the run or use up the worker threads
+  - logs and the result carry counts and durations only (read, skipped outside the root, uploaded, removed, seconds) — never a document's text or path list
+  - covered with fake search and embedding clients and a temporary corpus (the symlink case is skipped on a machine that cannot create symlinks)
+  - the text of every file is cleaned before chunking: control and format characters (zero-width, bidirectional marks, NUL) are removed and HTML comments are dropped; the number of files that changed is logged (a count, never text)
+  - `source` also goes through the title cleaning rules: printable characters only, no newline, bounded length (3.2 already makes it repo-relative and cleans the title)
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-06 — planned from the api 3.1 threat model (T3, G3, G6). Runs after 3.2 so it changes the one ingestion code path once; 3.3 depends on it so the endpoint never exposes the unhardened job.
+  - 2026-10-06 — after api 3.2: `.txt` is already dropped, `source` is already `docs/<relative path>`, and a non-UTF-8 file already fails the run — only the path-escape/symlink check, stale-chunk removal, the call timeouts, content cleaning and the `source` sanitising remain here. The threat model's pre-launch checklist says G6 is settled in 3.2; it is settled here instead (3.5) — update that line when this item closes.
 
 ## Phase 4 — Chat with citations (F1)
 
@@ -305,16 +345,21 @@ need a human with access._
 ### 4.2 — Ask in a conversation (JSON)
 
 - **status:** todo
-- **depends_on:** [1.1, 2.1, 3.2, 4.1]
+- **depends_on:** [1.1, 2.1, 3.2, 4.1, 4.4]
 - **layers:** [endpoint, ai]
 - **acceptance:**
-  - `POST /v1/conversations/{id}/ask` with `{ "question": string }` → `200` `{ message_id, answer, citations }`, where `citations` is `[{ title, path }]` drawn from the retrieved documents (`top_k = 5`)
+  - `POST /v1/conversations/{id}/ask` with `{ "question": string }` → `200` `{ message_id, answer, citations }`, where `citations` is `[{ title, path }]`: the retrieved documents (`top_k = 5`) whose `[n]` the answer cites, each once, in citation order — an answer that cites nothing (for example "I do not know") returns `[]`; the same list is what is stored with the assistant message
   - the user message is stored first; the assistant message (with citations JSON and token count) is stored after the answer; the conversation title and `updated_at` follow decision 11
   - the model receives the last 10 messages of the conversation as history, then the context, then the question
   - empty question → `422`; over 4,000 characters → `413 payload_too_large`; unknown conversation → `404`
   - a model or search failure → `503 ai_unavailable`, the user message is kept and no assistant message is stored
   - model calls go through the template's client and span; no question, answer or retrieved text appears in logs, spans, metrics or events
   - the call has a 60 s timeout and the standard retries; `x-trace-id` echoed; OpenAPI and `http-api.md` regenerated
+  - history is rebuilt from stored rows with `user` → human message and `assistant` → AI message only; any other role is dropped and a stored row never becomes a system message (test with a fake row of another role)
+  - the answer has an output bound: `max_tokens` from `AI_MAX_OUTPUT_TOKENS` (default 1024, documented in `.env.example` and `environment-variables.md`)
+  - the retrieval and query-embedding calls each have an explicit timeout (default 30 s) and a failure maps to the same `503 ai_unavailable`
+  - the stored assistant text is capped so that 500 messages stay under the BFF's response limit; the cut is logged by kind only (the value is chosen at implementation, with a test at the boundary)
+  - at most `AI_MAX_CONCURRENT_ASKS` asks (default 4, documented in `.env.example` and `environment-variables.md`) run at once in the process; one more is answered `429 busy` before anything is stored; the slot is released on every exit path (answer, error, cancellation)
 - **how_to_test:**
   - _(filled in by `/implement-next`)_
 - **needs_human:**
@@ -323,6 +368,8 @@ need a human with access._
   - 2026-10-06 — planned. The web hop timeout must exceed 60 s plus retries (rule 70) — note for the web roadmap.
   - 2026-10-06 — from the 1.1 security review: the request schema caps `question` at 4,000 characters, `citations` come only from retrieval results (never from the request body), each citation is `{title, path}` strings of bounded length, and `token_count` is non-negative.
   - 2026-10-06 — from the 4.1 security review (code-side, so they belong here, not in the prompt): (1) `Answer.sources` and the `sources` frame are every retrieved chunk's source, and the `[n]` markers in the answer are never checked — validate `[n]` against the number of passages and build the stored/returned `citations` from retrieval only, never from model-written paths; (2) `format_context` inserts `content` and `source` raw, so a passage can forge a `[n] (path)` header — delimit passages unforgeably (collapse newlines in `source`, neutralise header-like lines in `content`); (3) history: map stored rows with role `user` → `HumanMessage` and `assistant` → `AIMessage` only, never a `SystemMessage` from stored text, with a test; note that `[n]` is renumbered every turn, so old `[n]` in history do not refer to this turn's passages; (4) check how the web renders answers (markdown images/links) before the first live answer.
+  - 2026-10-06 — from the api 3.1 threat model (AI-5, G2, G3) and the 4.1 security review: history role mapping, output bound, retrieval timeouts and the stored-size cap moved from notes into acceptance; passage delimiting and citation checks are item 4.4, which this item now depends on. Open decision (not planned): a cap on concurrent asks, so one client cannot spend the whole quota — the BFF/ingress rate limit (G1) belongs in the web roadmap.
+  - 2026-10-06 — decisions taken by Claude on the developer's instruction to follow its recommendations: (1) citations are the cited subset, not every retrieved passage; (2) a process-wide cap on concurrent asks is in this item (the BFF/ingress rate limit stays a web-layer need); (3) `trace_id` is **not** stored on message rows — it would need a new migration on tables already applied, and logs carry the id per request (revisit with auth; threat model G14, R3).
 
 ### 4.3 — Streaming ask
 
@@ -330,11 +377,13 @@ need a human with access._
 - **depends_on:** [4.2]
 - **layers:** [endpoint, ai]
 - **acceptance:**
-  - `POST /v1/conversations/{id}/ask/stream` returns `text/event-stream` with frames `sources` (`[{ title, path }]`), then `token`\* (`{ text }`), then `done` (`{ message_id, input_tokens, output_tokens }`) or `error` (`{ error_kind, error, trace_id }`) — extending the template's frames (B3)
+  - `POST /v1/conversations/{id}/ask/stream` returns `text/event-stream` with frames `sources` (`[{ title, path }]`), then `token`\* (`{ text }`), then `done` (`{ message_id, input_tokens, output_tokens, citations }`, where `citations` is the cited subset exactly as in 4.2 and as stored) or `error` (`{ error_kind, error, trace_id }`) — extending the template's frames (B3)
   - the user message is stored before streaming starts; the assistant message is stored only after `done`; an `error` frame or a client disconnect before `done` stores no assistant message
   - validation and not-found cases behave as in 4.2 (answered as normal JSON errors before the stream starts)
   - `x-trace-id` is on the response headers, and the `error` frame carries the same trace id; no content in telemetry
   - the frame shapes are documented in `http-api.md`
+  - the `sources` frame still lists every retrieved passage, as the template's stream does; a client shows it early and replaces it with `citations` when `done` arrives
+  - a stream holds one of the `AI_MAX_CONCURRENT_ASKS` slots until it ends (`done`, `error` or disconnect); an extra stream before the first byte is answered `429 busy` as normal JSON
 - **how_to_test:**
   - _(filled in by `/implement-next`)_
 - **needs_human:**
@@ -342,6 +391,25 @@ need a human with access._
 - **notes:**
   - 2026-10-06 — planned. The web roadmap's chat item depends on this one (`api:4.3`) and on the frame shapes above.
   - 2026-10-06 — from the 1.4 security review: if a database error escapes after the stream has started (for example persisting the assistant message at the end), `UnhandledErrorMiddleware` re-raises it and the FastAPI instrumentation records `str(exc)` and the traceback on the server span — including SQL Server's own message, which can quote the text. The stream must therefore catch database errors itself and end with the bounded `error` frame, never re-raise after `http.response.start`; add a test that fails a DB write mid-stream and checks the exported server span carries no driver text.
+  - 2026-10-06 — decisions taken with 4.2 (see its notes): `done` carries the cited `citations`, and streams count against the concurrency cap. **Web impact (not edited here):** web 3.1/3.2/3.3 and the hand-declared `DoneFrame` type must add `citations`, show the early `sources` list and swap it for `done.citations` — to add when planning or implementing those items.
+
+### 4.4 — Unforgeable passage headers and citation checks
+
+- **status:** todo
+- **depends_on:** [4.1]
+- **layers:** [ai]
+- **acceptance:**
+  - in the context given to the model, each passage's number is assigned by the code, and its `source` and `content` cannot imitate a passage header: newlines and header-like text in `source` are removed, and lines in `content` that look like a header (`[n] (…)`) or the `Context:` marker are neutralised
+  - a helper reports which `[n]` markers in an answer point to no passage; the ask routes use it to log a bounded count (no text) and never to rewrite the answer
+  - the citations that are returned or stored always come from the retrieved passages, never from text the model wrote, and are only the passages whose valid `[n]` the answer cites (a helper returns them from the answer text and the passage list)
+  - offline eval cases: a passage that forges a header (the harness checks the rendered prompt, not only the scripted answer) and an answer that cites a number that does not exist
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-06 — planned from the api 3.1 threat model (S6, AI-2, AI-3) and the 4.1 security review, which found that `format_context` inserts passages raw and that `[n]` markers are never checked. Changes `app/ai/graph.py`; the prompt (4.1) is unchanged. Open design point for 4.3: the stream sends `sources` (all retrieved passages) before the first token, so the web page shows every retrieved source, not only the cited ones; whether to narrow the stored citations to the cited numbers is a product decision to make then.
+  - 2026-10-06 — design point settled (see 4.2 notes): stored/returned citations are the cited subset; the stream's early `sources` frame stays all retrieved.
 
 ## Phase 5 — Hardening
 
@@ -374,3 +442,19 @@ need a human with access._
   - apply the migration to dev after review and confirmation
 - **notes:**
   - 2026-10-06 — planned, **only needed before the api runs more than one replica** (decision 19). Safe to leave `todo` until a deployment exists.
+
+### 5.3 — More injection eval cases and a live eval run
+
+- **status:** todo
+- **depends_on:** [4.2, 4.4]
+- **layers:** [ai]
+- **acceptance:**
+  - `tests/evals/cases.json` gains cases for: a passage that asks for a markdown image or link carrying the question (the answer must not contain image or link syntax), a passage that tells the model to cite a number that does not exist, and a poisoned earlier assistant turn in the history that tells the model to drop its rules; cases can carry a `history`, and the harness passes it through
+  - the offline harness still proves what the model receives (rules first, one system message, nothing from history or passages in the system role beyond the context slot)
+  - the live tier (`AI_EVAL_LIVE=true`) grades every case; the result is recorded in this item's notes, and a case that fails live is fixed in the prompt or code before the item is closed
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - run the live eval tier against the dev Foundry deployment (`AZURE_AI_*` in `apps/api/.env`) and report the result — an agent cannot call the real model
+- **notes:**
+  - 2026-10-06 — planned from the api 3.1 threat model (G12). The offline tier only pins the plumbing and the prompt's wording; this is the item that shows how the real model behaves under injection.
