@@ -199,7 +199,7 @@ need a human with access._
 
 ### 3.1 — Threat model for chat, history and ingest
 
-- **status:** todo
+- **status:** done
 - **depends_on:** []
 - **layers:** [docs]
 - **acceptance:**
@@ -207,11 +207,19 @@ need a human with access._
   - each threat has a mitigation that maps to a roadmap item or an accepted risk
   - ADR-0014 and ADR-0015 link to it
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - open `docs/security/threat-models/team-assistant.md`: the status line says "Draft — awaiting review"; section 6 is the threat register (each row names its mitigation item, or ACCEPTED with a proposed owner), section 7 the AI threats, section 8 lists 15 gaps with no roadmap item (G1–G15)
+  - check the five topics are covered: shared conversations (ADR-0014: I1, S2, R1), the ingest key (ADR-0015: S5, E1), corpus injection (section 7, AI-1 to AI-5), quota abuse (section 6.5), the all-IP dev firewall (section 6.7)
+  - `docs/adr/0014-…md` and `docs/adr/0015-…md` each got one Consequences bullet and one References line linking to it (`git diff docs/adr` shows 6 added lines, nothing else)
+  - `docs/security/threat-models/README.md` lists it with status "Draft — awaiting review"
 - **needs_human:**
-  - review and accept the threat model before 3.3 ships
+  - review the threat model and accept it (or say what to change) before 3.3 ships; the "ACCEPTED" entries are proposals until you do
+  - decide what to do with gaps G1–G15 (section 8): none is a roadmap item yet. Highest priority: G1/G2 rate limit and `max_tokens` (cost); G9 restrict the dev SQL firewall (an admin action, decision 22; ARCHITECTURE B6 still says "no change needed", a Part B edit for the team to make); G6 ingest hygiene (before 3.2/3.3 ship); G8 admin-key hardening (3.3). `/plan-roadmap api` can turn the ones you choose into items
+  - two open decisions: store `trace_id` on message rows (G14), and whether decision 14's corpus scope should be narrowed (G7)
 - **notes:**
   - 2026-10-06 — planned. Delegate to `threat-modeler` (inputs listed in the 2026-10-06 architecture review).
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — drafted by the `threat-modeler` agent; verified by Claude against the repo: all 19 roadmap ids cited exist; spot-checked claims hold (`.txt` accepted and `rglob` in `app/ai/ingest.py`; upsert only; the default log redaction list has no admin-key entry; the web renders plain text and sets no CSP; ARCHITECTURE B6 contradicts decision 22). Files: `docs/security/threat-models/team-assistant.md` (new), its README row, one pointer each in ADR-0014 and ADR-0015 (decisions and status unchanged). Docs only: no code, no tests, no version bump. Not verified (flagged in the model): the BFF's `x-trace-id` handling, whether `pii-purge.md` covers the SQL tables, Foundry data-retention settings.
+  - 2026-10-06 — confirmed by Yousef Wahid (the "done" closes the item; the threat model file itself stays "Draft — awaiting review" until its acceptance is recorded — gaps G1–G15 are still unplanned).
 
 ### 3.2 — Ingestion with titles at 3072 dimensions
 

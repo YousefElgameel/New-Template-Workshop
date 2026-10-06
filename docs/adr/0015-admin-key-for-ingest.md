@@ -27,6 +27,8 @@ endpoint returns `401` (fail closed), and the BFF does not expose the route.
 - Bad: an extra secret to provision (a human step) — a Key Vault entry when deployed, a `.env`
   entry locally.
 - Bad: replaced by Okta roles when auth lands (this ADR is then superseded).
+- Threat model: [`docs/security/threat-models/team-assistant.md`](../security/threat-models/team-assistant.md)
+  (draft) covers this decision (S5, R2, I5, D4, E1) and lists key hardening as gap G8.
 
 ## Alternatives considered
 
@@ -39,3 +41,4 @@ endpoint returns `401` (fail closed), and the BFF does not expose the route.
 
 - Related ADRs: ADR-0009
 - Docs: `.claude/rules/50-security.md`, `docs/architecture/ARCHITECTURE.md` B8 decision 9
+- Threat model: `docs/security/threat-models/team-assistant.md`

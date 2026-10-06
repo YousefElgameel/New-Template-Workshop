@@ -32,6 +32,8 @@ conversation, until Okta lands and ownership is added in a new migration.
   needed then.
 - Bad: message content is personal-data-capable and kept indefinitely (no purge job); a threat
   model must cover it.
+- Threat model: [`docs/security/threat-models/team-assistant.md`](../security/threat-models/team-assistant.md)
+  (draft) covers this decision (S2, R1, I1, I2, D3, E3) and records the rate-limit gap.
 
 ## Alternatives considered
 
@@ -43,3 +45,4 @@ conversation, until Okta lands and ownership is added in a new migration.
 
 - Related ADRs: ADR-0008, ADR-0012
 - Docs: `.claude/rules/50-security.md`, `docs/architecture/ARCHITECTURE.md` B7, B8
+- Threat model: `docs/security/threat-models/team-assistant.md`
