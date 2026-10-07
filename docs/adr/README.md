@@ -25,8 +25,8 @@ recur and agents re-invent decisions on every change.
 | 0010 | UI foundation — Tailwind v4, chat components, SSE pass-through, MOCK_UPSTREAM   | Proposed           | 2026-09-28 |
 | 0011 | Component tests with React Testing Library in Vitest (per-file jsdom)           | Proposed           | 2026-09-28 |
 | 0012 | Bicep on a shared platform — use-case-scoped infrastructure, vendored blocks    | Proposed           | 2026-10-04 |
-| 0013 | Corpus baked into the api image                                                 | Proposed           | 2026-10-06 |
-| 0014 | Conversations are shared until auth lands                                       | Proposed           | 2026-10-06 |
-| 0015 | Shared-secret header guards the ingest endpoint                                 | Proposed           | 2026-10-06 |
+| 0013 | Corpus baked into the api image                                                 | Accepted           | 2026-10-06 |
+| 0014 | Conversations are shared until auth lands                                       | Accepted           | 2026-10-06 |
+| 0015 | Shared-secret header guards the ingest endpoint                                 | Accepted           | 2026-10-06 |
 
 <!-- Append new rows above; newest last. -->

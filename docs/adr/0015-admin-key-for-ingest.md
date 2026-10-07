@@ -1,9 +1,9 @@
 # ADR-0015: Shared-secret header guards the ingest endpoint
 
-|        |            |
-| ------ | ---------- |
-| Status | Proposed   |
-| Date   | 2026-10-06 |
+|        |                                      |
+| ------ | ------------------------------------ |
+| Status | Accepted by Yousef Wahid, 2026-10-07 |
+| Date   | 2026-10-06                           |
 
 ## Context
 

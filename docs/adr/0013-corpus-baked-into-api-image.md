@@ -1,9 +1,9 @@
 # ADR-0013: Corpus baked into the api image
 
-|        |            |
-| ------ | ---------- |
-| Status | Proposed   |
-| Date   | 2026-10-06 |
+|        |                                      |
+| ------ | ------------------------------------ |
+| Status | Accepted by Yousef Wahid, 2026-10-07 |
+| Date   | 2026-10-06                           |
 
 ## Context
 

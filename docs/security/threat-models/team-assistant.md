@@ -1,13 +1,13 @@
 # Threat model: Team Assistant (chat with citations, shared history, corpus ingest)
 
-|             |                                                                                                                |
-| ----------- | -------------------------------------------------------------------------------------------------------------- |
-| Author      | `threat-modeler` agent, for Yousef Wahid (project admin), roadmap item **api 3.1**                             |
-| Date        | 2026-10-06                                                                                                     |
-| Status      | **Draft — awaiting review** (not yet accepted; acceptance is recorded on api 3.1 and gates api 3.3)            |
-| Scope       | F1 chat with citations, F2 shared conversation history, F3 corpus ingest (B2); environment `dev` only (B8 #16) |
-| Method      | STRIDE on the **design** (ARCHITECTURE.md Part B) plus a read of the code that exists today (see "Evidence")   |
-| Next re-run | After api 3.3, 4.2 and 4.3 land, against the real code (see "Re-check after implementation")                   |
+|             |                                                                                                                          |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Author      | `threat-modeler` agent, for Yousef Wahid (project admin), roadmap item **api 3.1**                                       |
+| Date        | 2026-10-06                                                                                                               |
+| Status      | **Accepted by Yousef Wahid, 2026-10-07** ("accept the threat model and ADR-0013 to ADR-0015"), with the decisions of §8a |
+| Scope       | F1 chat with citations, F2 shared conversation history, F3 corpus ingest (B2); environment `dev` only (B8 #16)           |
+| Method      | STRIDE on the **design** (ARCHITECTURE.md Part B) plus a read of the code that exists today (see "Evidence")             |
+| Next re-run | After api 3.3, 4.2 and 4.3 land, against the real code (see "Re-check after implementation")                             |
 
 ## 1. Feature summary
 
@@ -248,10 +248,9 @@ existing item is the natural home I name it, but I have not edited any roadmap.
 | G14 | **Decide on audit linkage:** store the `trace_id` on each message row (bounded, not content), and whether ingest logs the caller's address.                                                                                                                                                             | R1, R2                       | api 4.2 / 3.3 design decision (needs a human call)                    | -                                             |
 | G15 | **Okta/auth** is not in `roadmaps/api` or `roadmaps/web`; rule 50 calls it a later phase. It needs an ADR and a new threat model first, and an ownership backfill for existing conversations.                                                                                                           | S2, I1, R1, E3               | a future roadmap phase                                                | any exposure beyond the internal team         |
 
-## 8a. Proposed decisions of 2026-10-07
+## 8a. Decisions of 2026-10-07
 
-Proposed by Claude, on Yousef Wahid's instruction to take the decisions on his behalf, to plan the gaps above. They become effective when Yousef Wahid accepts this threat model (the acceptance
-itself, and ADR-0013 to ADR-0015, are his to give — see the checklist in §10). The third column says what makes one worth revisiting.
+Worked out by Claude on Yousef Wahid's instruction to take the decisions on his behalf, and accepted with this threat model by Yousef Wahid on 2026-10-07; the planned work is roadmap items web 3.4, web 3.5, api 3.3 (corpus cap), api 5.6 to 5.8. The third column says what makes one worth revisiting.
 
 | Gap      | Decision                                                                                                                                                                                                                                                                                                                                                                                                           | Revisit when                                                    |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
@@ -278,7 +277,7 @@ BFF → api hop timeout stays at 5 minutes (it is only an upper bound).
 
 ## 9. Residual-risk table
 
-"Accepted by" is the **proposed** acceptor; none of this is accepted until Yousef Wahid replies on api 3.1 (its `needs_human`).
+"Accepted by" names the acceptor; Yousef Wahid accepted this threat model on 2026-10-07 ("accept the threat model and ADR-0013 to ADR-0015"), so the residuals below stand until their triggers.
 Because the team is one person, there is no independent second reviewer: the cloud team is the only outside check (platform, firewall).
 
 | Threat IDs            | Residual after the named controls                                                          | Rating                                                                                   | Proposed acceptor                              | Valid until / trigger that voids it                                                  |
@@ -300,7 +299,7 @@ Shared use means anyone besides the project admin using the deployment.
 
 **Before api 3.3 ships (ingest endpoint)**
 
-- [ ] This threat model is reviewed and accepted by Yousef Wahid (api 3.1 `needs_human`); ADR-0015 accepted.
+- [x] This threat model is accepted by Yousef Wahid and so is ADR-0015 (2026-10-07).
 - [ ] G8: key length/entropy check, redaction registration with a test, rotation steps written.
 - [x] G6 (`.md`-only, outside-root rejection, stale-chunk cleanup, text cleaning) is settled in api 3.5 — hidden characters and HTML comments are removed rather than failing the run.
 - [ ] Ingest keeps blocking calls off the event loop; `409` single-flight tested; the route is absent from the BFF.
