@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { askStream } from '@/lib/chat-client';
 import { ChatThread } from './ChatThread';
 import { MessageInput } from './MessageInput';
@@ -21,6 +21,9 @@ export function ChatPanel({ endpoint, title = 'Assistant' }: Props) {
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Leaving the page ends the stream instead of letting it run on unseen.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   function patchLast(patch: (m: ChatMessage) => ChatMessage) {
     setMessages((prev) => prev.map((m, i) => (i === prev.length - 1 ? patch(m) : m)));
   }
@@ -35,23 +38,28 @@ export function ChatPanel({ endpoint, title = 'Assistant' }: Props) {
     setBusy(true);
     abortRef.current?.abort();
     abortRef.current = new AbortController();
-    await askStream(
-      endpoint,
-      question,
-      {
-        onSources: (sources) => patchLast((m) => ({ ...m, sources })),
-        onToken: (text) => patchLast((m) => ({ ...m, text: m.text + text })),
-        onDone: ({ sources }) =>
-          patchLast((m) => ({
-            ...m,
-            pending: false,
-            sources: sources.length ? sources : m.sources,
-          })),
-        onError: (kind) => patchLast((m) => ({ ...m, pending: false, error: kind })),
-      },
-      { signal: abortRef.current.signal },
-    );
-    setBusy(false);
+    try {
+      await askStream(
+        endpoint,
+        question,
+        {
+          onSources: (sources) => patchLast((m) => ({ ...m, sources })),
+          onToken: (text) => patchLast((m) => ({ ...m, text: m.text + text })),
+          // The early list is every retrieved document; `done` says which ones the answer cites.
+          onDone: ({ citations }) =>
+            patchLast((m) => ({ ...m, pending: false, sources: citations })),
+          onError: ({ kind, traceId }) =>
+            patchLast((m) => ({
+              ...m,
+              pending: false,
+              error: { kind, ...(traceId ? { traceId } : {}) },
+            })),
+        },
+        { signal: abortRef.current.signal },
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (

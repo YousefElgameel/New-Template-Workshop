@@ -121,8 +121,11 @@ describe('<ChatWorkspace />', () => {
     const thread = await screen.findByRole('list', { name: 'Conversation' });
     expect(within(thread).getByText(/minted by the BFF/)).toBeInTheDocument();
     const sources = within(thread).getAllByRole('list', { name: 'Sources' });
-    expect(sources[0]).toHaveTextContent('[1] docs/architecture/observability.md');
-    expect(sources[0]).toHaveTextContent('[2] docs/architecture/overview.md');
+    // each cited document shows its title and, beside it, its path (the web 3.2 Sources block)
+    expect(sources[0]).toHaveTextContent('Observability architecture');
+    expect(sources[0]).toHaveTextContent('docs/architecture/observability.md');
+    expect(sources[0]).toHaveTextContent('Architecture overview');
+    expect(sources[0]).toHaveTextContent('docs/architecture/overview.md');
   });
 
   it('shows the error line with the trace_id when opening fails, and recovers on the next open', async () => {
@@ -304,7 +307,8 @@ describe('<ChatWorkspace />', () => {
     const user = userEvent.setup();
     const { container } = render(<ChatWorkspace />);
     await user.click(await screen.findByRole('button', { name: /Error contract/ }));
-    await screen.findByText(evil);
+    // the hostile string is the message text and, in the Sources block, a title: text both times
+    expect((await screen.findAllByText(evil)).length).toBeGreaterThanOrEqual(2);
     expect(container.querySelector('img')).toBeNull();
   });
 

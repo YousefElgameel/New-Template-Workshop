@@ -169,11 +169,17 @@ function frame<E extends AskStreamEvent['event']>(
   return sseFrame(event, data);
 }
 
+/** A document that was retrieved but that the answer does not cite: only the `sources` frame lists it. */
+const retrievedButNotCited: Citation = {
+  title: 'HTTP API reference',
+  path: 'docs/reference/http-api.md',
+};
+
 /** `POST …/ask/stream` — `sources`, then one `token` per word, then `done`. */
 export const conversationAskStreamFrames: string[] = [
   frame('sources', {
-    sources: conversationAskResponse.citations,
-    count: conversationAskResponse.citations.length,
+    sources: [...conversationAskResponse.citations, retrievedButNotCited],
+    count: conversationAskResponse.citations.length + 1,
   }),
   ...conversationAskResponse.answer
     .split(' ')
@@ -184,6 +190,7 @@ export const conversationAskStreamFrames: string[] = [
     message_id: conversationAskResponse.message_id,
     input_tokens: 42,
     output_tokens: 24,
+    citations: conversationAskResponse.citations,
   }),
 ];
 

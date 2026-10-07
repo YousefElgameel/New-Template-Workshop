@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ConversationListItem, ConversationMessage } from '@/lib/conversation-types';
+import type { Citation, ConversationListItem, ConversationMessage } from '@/lib/conversation-types';
 import { createConversation, getConversation, listConversations } from '@/lib/conversations-client';
 import { ChatThread } from './ChatThread';
 import { ConversationList } from './ConversationList';
@@ -36,9 +36,11 @@ function ErrorLine({ what, failure }: Readonly<{ what: string; failure: Failure 
   );
 }
 
-/** A stored message as the thread renders it; citations become their unique `docs/…` paths. */
+/** A stored message as the thread renders it; its citations keep their titles, one per path. */
 function toChatMessage(m: ConversationMessage): ChatMessage {
-  const sources = [...new Set((m.citations ?? []).map((c) => c.path))];
+  const byPath = new Map<string, Citation>();
+  for (const c of m.citations ?? []) if (!byPath.has(c.path)) byPath.set(c.path, c);
+  const sources = [...byPath.values()];
   return { id: m.id, role: m.role, text: m.content, ...(sources.length ? { sources } : {}) };
 }
 

@@ -178,7 +178,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 3.2 — Streaming client and Sources block
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [1.1]
 - **layers:** [ui]
 - **acceptance:**
@@ -187,11 +187,16 @@ conversation surface (decision 18) — the removal is item 4.1._
   - a `Sources` block renders under an assistant message: each citation shows the title, with the path beside it; no block when there are none
   - the existing chat component tests are updated to the new shapes and still pass
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `cd apps/web && pnpm test` — expect **397 passed** (23 files); `pnpm exec tsc --noEmit` — no output.
+  - Read the specs that pin the acceptance: `src/lib/chat-client.test.ts` (frames, malformed frames skipped, bounded kinds, abort/network, `incomplete`, `too_long`), `src/lib/sse.test.ts` (CR/LF/CRLF, size cap), `src/components/chat/Sources.test.tsx`, `ChatThread.test.tsx`, `ChatPanel.test.tsx`.
+  - Not visible in a browser yet: nothing sends a question from the page until web 3.1 (BFF routes) and 3.3 (send).
 - **needs_human:**
-  - none
+  - Product call: after a failed or aborted answer the early, uncited document list stays under the message (the api defines only the replace-on-`done` case). Say if it should be cleared instead.
 - **notes:**
   - 2026-10-06 — planned. The frame shapes come from api roadmap 4.3; adjust here if that item changes them.
+  - 2026-10-07 — started by Claude.
+  - 2026-10-07 — implemented by Claude: `sse.ts`, `chat-client.ts`, `conversation-types.ts`, `Sources.tsx` (new), `ChatThread`/`ChatPanel`/`ChatWorkspace`/`types.ts`, mocks and tests; web 0.4.0 (CHANGELOG, `CLAUDE.md`, rule 30). 397 tests, 23 mutations caught. code-reviewer and security-reviewer run; docs drift, handler contract, body cancel, size caps (event 64,000, answer 8,000 → `too_long`) and unmount abort fixed. Decisions: Sources rows unnumbered; a stream ending without `done`/`error` is `incomplete`; parser splits lines on CR/LF/CRLF only. Deferred: Stop button, per-message handler binding, aria-live scope (3.3); CSRF/request caps (3.1).
+  - 2026-10-07 — confirmed by Yousef Wahid.
 
 ### 3.3 — Send a question into the open conversation
 

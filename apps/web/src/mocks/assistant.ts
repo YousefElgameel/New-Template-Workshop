@@ -19,9 +19,16 @@ export const askFixture: AskResponse = {
   sources: ['docs/api.md', 'docs/web.md'],
 };
 
-/** The frames apps/api `stream_answer()` would emit: sources → token* → done. */
+const citations = askFixture.sources.map((path) => ({ title: path, path }));
+
+/** The frames the api's conversation stream emits: sources → token* → done (api roadmap 4.3). */
 export const askStreamFrames: string[] = [
-  sseFrame('sources', { sources: askFixture.sources, count: 2 }),
+  sseFrame('sources', { sources: citations, count: 2 }),
   ...askFixture.answer.split(' ').map((word) => sseFrame('token', { text: `${word} ` })),
-  sseFrame('done', { sources: askFixture.sources, input_tokens: 42, output_tokens: 24 }),
+  sseFrame('done', {
+    message_id: 'mock-message',
+    input_tokens: 42,
+    output_tokens: 24,
+    citations,
+  }),
 ];

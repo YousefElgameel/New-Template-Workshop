@@ -42,9 +42,9 @@ export interface ConversationAskResponse {
 }
 
 /**
- * `event: sources` — retrieval finished; arrives before any token. `count` is carried over from
- * the template's frame (`apps/api/app/ai/streaming.py`); api 4.3 does not mention it, so treat it
- * as unconfirmed.
+ * `event: sources` — retrieval finished; arrives before any token. `sources` lists **every
+ * retrieved document once**, cited or not; `count` is the number of passages retrieved (api 4.3,
+ * `docs/reference/http-api.md`). Show it early and replace it with `DoneFrame.citations`.
  */
 export interface SourcesFrame {
   sources: Citation[];
@@ -56,12 +56,31 @@ export interface TokenFrame {
   text: string;
 }
 
-/** `event: done` — the answer is complete and stored. */
+/**
+ * `event: done` — the answer is complete and stored. `citations` are the documents the answer
+ * actually cites, in citation order, exactly as stored (empty when it cites none). The token counts
+ * are `null` when the model did not report them or the answer was cut.
+ */
 export interface DoneFrame {
   message_id: string;
-  input_tokens: number;
-  output_tokens: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  citations: Citation[];
 }
+
+/**
+ * The failure kinds an `error` frame carries (api `error_kind`). The browser client reports more
+ * as plain strings: `aborted`, `network_error`, `stream_error`, `incomplete`, `too_long`,
+ * `upstream_error`, `request_rejected` and the api's JSON codes (`busy`, `not_found`, …) for a
+ * request refused before the stream. All are short snake_case words, never exception text.
+ */
+export type StreamErrorKind =
+  | 'timeout'
+  | 'rate_limited'
+  | 'network'
+  | 'error'
+  | 'empty_answer'
+  | 'persist_failed';
 
 /**
  * `event: error` — terminal: no `done` follows and no assistant message is stored. `error_kind`

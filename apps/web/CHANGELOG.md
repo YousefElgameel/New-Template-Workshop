@@ -7,6 +7,49 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-07
+
+### Added
+
+- **`Sources` block** (web roadmap 3.2, `src/components/chat/Sources.tsx`): under an assistant message, one row per cited
+  document — its title with its path beside it. Titles and paths come from indexed documents, so they are **plain text
+  only**: no markup, no `<a>`, no link target (a path such as `javascript:alert(1)` is just characters). The rows are not
+  numbered, because the `[n]` in an answer are the numbers of the passages the model was shown, not positions in this
+  list. Nothing is drawn for a message with no citations.
+- **The error line shows the trace id** (`ChatThread`): "Something went wrong (timeout). Trace ID: …", when the failure
+  has one.
+- A **size limit on one SSE event** (64,000 characters): a stream that never ends an event is cut off as a stream
+  error instead of being buffered without bound. The connection is cancelled when the client stops reading early.
+- A **size limit on an answer** (8,000 characters, twice the api's cap): a stream that keeps sending tokens ends with
+  the failure kind `too_long`. Leaving a `ChatPanel` aborts its stream.
+
+### Changed
+
+- **`askStream` speaks the conversation stream** (`src/lib/chat-client.ts`; api roadmap 4.3): `sources` is
+  `[{ title, path }]` and is every retrieved document; `done` carries `message_id`, token counts (numbers or `null`) and
+  `citations` — the documents the answer cites, which **replace** the early list; `error` carries `error_kind`, `error`
+  and `trace_id`. The handlers changed shape: `onSources(citations)`, `onDone({ messageId, citations, inputTokens, outputTokens })`, `onError({ kind, code, traceId })`.
+  - Every field of every frame is checked before a handler sees it; a malformed or wrong-shaped frame is skipped.
+    Kinds, codes and trace ids must match a pattern, citation lists and strings are bounded.
+  - A request refused before the stream (`busy`, `payload_too_large`, `not_found`, `validation_error`, …) reports the
+    api's code and trace id.
+  - **A stream that ends without `done` or `error` is now a failure (`incomplete`)**, not a finished answer: the api
+    stores nothing in that case, so showing the partial text as complete would be wrong.
+- **The SSE parser follows the specification for line breaks** (`src/lib/sse.ts`): lines end with CR, LF or CRLF — and
+  only those, so a token containing U+2028, U+2029 or U+0085 cannot split a frame — a CRLF split between two chunks is
+  one break, and a value is no longer trimmed.
+- `ChatMessage.sources` is `{ title, path }[]` (was `string[]`), `ChatMessage.error` is `{ kind, traceId? }` (was a
+  string); `ChatWorkspace` keeps the titles of stored citations. Fixtures follow the api's frames: the stream fixture
+  lists a retrieved-but-uncited document in `sources` and puts the cited ones in `done.citations`.
+
+### Known limits
+
+- The BFF stream routes (web 3.1) and sending from the page (web 3.3) are not built yet: `askStream` is exercised
+  against fixtures and the `ChatPanel` test harness only.
+- The template's demo route `/api/v1/assistant/ask/stream` (real mode too) still proxies the old `sources: string[]` shape,
+  so against a live template api the demo shows no sources until web 4.1 removes it. In mock mode it now emits the conversation frame shapes in mock mode; it is
+  removed in web 4.1.
+
 ## [0.3.0] — 2026-10-06
 
 ### Added

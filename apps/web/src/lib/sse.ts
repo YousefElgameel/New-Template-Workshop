@@ -7,11 +7,26 @@
  *   event: <name>\n
  *   data: <json>\n
  *   \n
+ *
+ * Lines end with CR, LF or CRLF — and only those, as the SSE specification says. Other
+ * Unicode line separators (U+2028, U+2029, U+0085) are ordinary characters inside a line: a
+ * model-written token that contains one must not be able to split a frame. (The api also
+ * escapes them in the JSON; the parser does not rely on that.)
  */
 
 export interface SseEvent {
   event: string;
   data: string;
+}
+
+/** The longest event the parser will buffer, in characters. A stream that never ends an event is cut off. */
+export const MAX_SSE_EVENT_CHARS = 64_000;
+
+export class SseEventTooLargeError extends Error {
+  constructor() {
+    super('SSE event exceeds the size limit');
+    this.name = 'SseEventTooLargeError';
+  }
 }
 
 /** Build one SSE frame. `data` is JSON-encoded. */
@@ -21,14 +36,14 @@ export function sseFrame(event: string, data: unknown): string {
 
 /**
  * Parse one blank-line-delimited block into an event. Comment lines (`:`) are ignored,
- * multiple `data:` lines are joined with `\n`, a block without `event:` is a `message`.
+ * multiple `data:` lines are joined with `\n`, a block without `event:` is a `message`. Lines are
+ * split on CR, LF and CRLF only; a value keeps everything but one leading space.
  * Returns null for a block with no data.
  */
 export function parseSseBlock(block: string): SseEvent | null {
   let event = 'message';
   const data: string[] = [];
-  for (const rawLine of block.split(/\r?\n/)) {
-    const line = rawLine.trimEnd();
+  for (const line of block.split(/\r\n|\r|\n/)) {
     if (!line || line.startsWith(':')) continue;
     const colon = line.indexOf(':');
     const field = colon === -1 ? line : line.slice(0, colon);
@@ -41,18 +56,39 @@ export function parseSseBlock(block: string): SseEvent | null {
   return { event, data: data.join('\n') };
 }
 
-/** Iterate the events of an SSE body stream. */
+/**
+ * Iterate the events of an SSE body stream. Line endings are normalised to LF as bytes arrive, so a
+ * CRLF (or a lone CR) split across two chunks is still one line break, and blank-line boundaries
+ * work for any of the three. Throws `SseEventTooLargeError` if one event outgrows
+ * `MAX_SSE_EVENT_CHARS` without ending.
+ */
 export async function* readSseStream(
   body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<SseEvent, void, undefined> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let heldCr = false; // a CR at the end of a chunk: wait to see whether an LF follows
+
+  const normalise = (chunk: string, final: boolean): string => {
+    let text = heldCr ? `\r${chunk}` : chunk;
+    heldCr = false;
+    if (!final && text.endsWith('\r')) {
+      heldCr = true;
+      text = text.slice(0, -1);
+    }
+    return text.replace(/\r\n?/g, '\n');
+  };
+
+  let finished = false;
   try {
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      if (done) {
+        finished = true;
+        break;
+      }
+      buffer += normalise(decoder.decode(value, { stream: true }), false);
       let boundary = buffer.indexOf('\n\n');
       while (boundary !== -1) {
         const block = buffer.slice(0, boundary);
@@ -61,13 +97,16 @@ export async function* readSseStream(
         if (event) yield event;
         boundary = buffer.indexOf('\n\n');
       }
+      if (buffer.length > MAX_SSE_EVENT_CHARS) throw new SseEventTooLargeError();
     }
-    buffer += decoder.decode();
+    buffer += normalise(decoder.decode(), true);
     if (buffer.trim()) {
       const event = parseSseBlock(buffer);
       if (event) yield event;
     }
   } finally {
+    // Left early (a terminal frame, an oversize event, the caller stopped): close the connection.
+    if (!finished) await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }

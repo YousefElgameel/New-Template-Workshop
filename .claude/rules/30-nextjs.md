@@ -31,7 +31,8 @@ See [`apps/web/CLAUDE.md`](../../apps/web/CLAUDE.md).
   A model-backed endpoint routinely exceeds its 10 s default: pass `signal: AbortSignal.timeout(…)`.
 - **Streaming (SSE) upstreams** use **`streamUpstream` + `proxyStream`** (`src/lib/stream.ts`) —
   never `fetchUpstream` (JSON accept header, 10 s timeout, buffered read). The browser reads it
-  with `askStream` (`src/lib/chat-client.ts`); frames are parsed by `src/lib/sse.ts`.
+  with `askStream` (`src/lib/chat-client.ts`, which validates every frame — the stream is untrusted); frames are parsed
+  by `src/lib/sse.ts` (CR/LF/CRLF only, bounded event size).
 - On upstream failure, return a `502` JSON body including `trace_id` so the UI degrades gracefully
   (a streaming route returns a terminal `error` SSE frame with a bounded `error_kind`).
 - **Mocks (working ahead of the api):** inside the handler, `if (isMockUpstream()) return

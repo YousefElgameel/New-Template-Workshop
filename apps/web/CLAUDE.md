@@ -39,7 +39,10 @@ URL.
   `src/mocks/assistant.ts` (the template's single-turn demo; removed in roadmap web 4.1).
   `src/app/chat/page.tsx` — the chat page: a thin shell around `ChatWorkspace`, which talks to the
   conversation routes (`/api/v1/conversations…`) through `src/lib/conversations-client.ts`.
-- `src/components/chat/` — `ChatThread`, `MessageInput`, `ChatPanel`, `ConversationList` and `ChatWorkspace` (Tailwind, RTL-tested).
+- `src/components/chat/` — `ChatThread`, `MessageInput`, `ChatPanel`, `ConversationList`, `ChatWorkspace` and `Sources`
+  (Tailwind, RTL-tested). `Sources` is the block under an assistant message: each cited document's title with its path
+  beside it, as **plain text** (they are untrusted indexed text: no markup, no links), not numbered (the `[n]` in an answer
+  are passage numbers, not list positions); nothing is drawn when there are none.
   `ChatWorkspace` is the `/chat` page body: it owns the state and fetches (list after mount, open a
   conversation — latest click wins —, **+ New chat**, a drawer for the list below 768 px) and sends
   nothing yet (web 3.3). `MessageInput` takes an optional `textareaRef` (focus) and `keepText`; `ConversationList` takes `showEmpty`.
@@ -50,11 +53,12 @@ URL.
   server-rendered markup: fetch the list after mount so the first render has none. The page also has to bound the column's
   width (for truncation) and height (for the list to scroll).
 - `src/lib/stream.ts` (`streamUpstream`/`proxyStream`), `src/lib/sse.ts` (frame parser/builder),
-  `src/lib/chat-client.ts` (`askStream`, browser → BFF), `src/lib/mocks.ts`
+  `src/lib/chat-client.ts` (`askStream`, browser → BFF: the conversation stream's `sources`, `token`\*, `done` / `error`
+  frames, every field validated — see below), `src/lib/mocks.ts`
   (`isMockUpstream`/`mockJson`/`mockSse`), `src/lib/api-types.ts` (**generated** — `make openapi`).
 - `src/lib/conversation-types.ts` — the conversation contract (`/api/v1/conversations…`): create/list/open
   types **derived from the generated `api-types`**; the ask response and the stream frames (`sources`/`token`/`done`/
-  `error`) are **hand-declared** (`TODO(contract)`) until api 4.2/4.3 exist. `src/mocks/conversations.ts` — the
+  `error`) are **hand-declared** (the api serves them since 4.3; `docs/reference/http-api.md` is the reference). `src/mocks/conversations.ts` — the
   fixtures typed from it: an empty list, three listed conversations, a detail for each (long, short, empty), a created
   conversation, a JSON answer, a streamed answer and a streamed failure (`error` frame); pass the frame arrays to
   `mockSse`. `src/mocks/conversations.test.ts` keeps them honest (ordering, limits, frame order).
@@ -108,7 +112,12 @@ openapi`). Example: `/api/v1/assistant/ask[/stream]` + the `/chat` page.
 - **UI (ADR-0010/0011):** Tailwind v4 utilities; components in `src/components/<area>/` with a
   `*.test.tsx` beside each (`// @vitest-environment jsdom`, RTL, `afterEach(cleanup)`); the
   browser-side streaming client is `src/lib/chat-client.ts` (`askStream`), SSE parsing in
-  `src/lib/sse.ts`.
+  `src/lib/sse.ts`. The stream is untrusted input, so `askStream` skips malformed frames, checks every field
+  (citations `{title, path}` bounded; token counts non-negative integers or `null`; kinds, codes and trace ids matched
+  against patterns) and calls `onError` once with `{ kind, code, traceId }` — including for a request refused before the
+  stream (`busy`, `payload_too_large`, …) and for a stream that ends without `done`/`error` (`incomplete`: the api
+  stored nothing, so it is not a finished answer). The parser splits lines on CR, LF and CRLF only and refuses an event
+  over 64,000 characters, and `askStream` ends an answer over 8,000 characters with `too_long`.
 
 ## Commands
 

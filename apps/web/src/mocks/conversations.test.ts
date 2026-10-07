@@ -160,15 +160,23 @@ describe('ask fixtures', () => {
     expect(names.slice(1, -1).every((n) => n === 'token')).toBe(true);
     expect(names.filter((n) => n === 'error')).toEqual([]);
 
+    // `sources` lists every retrieved document — the cited ones and one the answer does not cite
     const sources = events[0];
-    expect(sources?.event === 'sources' && sources.data.sources).toEqual(
+    const listed = sources?.event === 'sources' ? sources.data : null;
+    expect(listed?.sources.slice(0, conversationAskResponse.citations.length)).toEqual(
       conversationAskResponse.citations,
     );
+    expect(listed?.sources.length).toBe(conversationAskResponse.citations.length + 1);
+    expect(listed?.count).toBe(listed?.sources.length);
     const text = events.flatMap((e) => (e.event === 'token' ? [e.data.text] : [])).join('');
     expect(text).toBe(conversationAskResponse.answer);
 
+    // `done` says which documents the answer cites, and the token counts are numbers or null
     const done = events.at(-1);
-    expect(done?.event === 'done' && done.data.message_id).toBe(conversationAskResponse.message_id);
+    if (done?.event !== 'done') throw new Error('last frame is not done');
+    expect(done.data.message_id).toBe(conversationAskResponse.message_id);
+    expect(done.data.citations).toEqual(conversationAskResponse.citations);
+    expect(done.data.input_tokens === null || Number.isInteger(done.data.input_tokens)).toBe(true);
   });
 
   it('the failure stream ends with a terminal error frame and never says done', async () => {

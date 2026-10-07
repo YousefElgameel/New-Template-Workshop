@@ -1,3 +1,4 @@
+import { Sources } from './Sources';
 import type { ChatMessage } from './types';
 
 const ROLE_LABEL: Record<ChatMessage['role'], string> = { user: 'You', assistant: 'Assistant' };
@@ -33,22 +34,17 @@ export function ChatThread({ messages }: Readonly<{ messages: ChatMessage[] }>) 
             </span>
           )}
           {m.error && (
-            <span role="alert" className="mt-2 block text-xs text-red-600">
-              Something went wrong ({m.error}). Try again.
+            <span role="alert" className="mt-2 block text-xs text-red-600 dark:text-red-400">
+              Something went wrong ({m.error.kind}). Try again.
+              {m.error.traceId && (
+                <>
+                  {' '}
+                  Trace ID: <code className="break-all">{m.error.traceId}</code>
+                </>
+              )}
             </span>
           )}
-          {m.sources && m.sources.length > 0 && (
-            <ul className="mt-2 flex flex-wrap gap-1" aria-label="Sources">
-              {m.sources.map((s, i) => (
-                <li
-                  key={s}
-                  className="rounded-md bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
-                >
-                  [{i + 1}] {s}
-                </li>
-              ))}
-            </ul>
-          )}
+          {m.sources && <Sources citations={m.sources} />}
         </li>
       ))}
     </ol>
