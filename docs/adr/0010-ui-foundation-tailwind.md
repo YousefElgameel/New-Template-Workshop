@@ -28,6 +28,7 @@ fixtures from `src/mocks/` typed against the generated API contract (`src/lib/ap
 `docs/reference/openapi.json`, `make openapi`). An example page `/chat` with the
 `/api/v1/assistant/ask[/stream]` BFF routes demonstrates all of it; the api ships no
 `/v1/assistant` route — a project adds one on `app/ai/`.
+_Update 2026-10-07 (web 0.7.0): the demo routes and their fixtures were removed; the conversation routes (`/api/v1/conversations…`) are the example now._
 
 ## Consequences
 

@@ -3,9 +3,8 @@
 The complete HTTP surface of both services as they exist today: the operational foundation
 (`/ping`, `/info`, `/health`), the first business endpoints (`/v1/conversations`), and the two demo
 BFF routes in `apps/web` that exercise the `web → api` hop, plus the BFF mirror of the conversation
-endpoints (`/api/v1/conversations`). The web BFF also has the template's example `/api/v1/assistant/ask[/stream]`
-routes (single-turn, no api route behind them; replaced in roadmap web 4.1); the real ask routes are in
-`/api/v1/conversations/[id]/ask[/stream]` (web 3.1).
+endpoints (`/api/v1/conversations`, including `/api/v1/conversations/[id]/ask[/stream]`). The template's single-turn
+`/api/v1/assistant/ask[/stream]` demo routes were removed in web 0.7.0.
 Derived from the route
 source, cross-checked against the test suites (`routes.test.ts`, `test_routes.py`).
 

@@ -44,10 +44,7 @@ URL.
   concrete id either: `src/lib/telemetry-scrub.ts` rewrites every UUID in `http.target`, `http.url`, `url.path` and
   `url.full` — and Next's `next.span_name` and its fetch span's name, which carry the upstream URL — to `{id}` (`IdScrubSpanProcessor` passed to the Azure distro, plus the undici instrumentation's
   `startSpanHook`); fail-safe, tested with an in-memory exporter. Any new id-bearing route is covered if its ids are UUIDs.
-- `src/app/api/v1/assistant/ask/route.ts` + `ask/stream/route.ts` — **example business routes**
-  (JSON + SSE) that proxy `${API_BASE_URL}/v1/assistant/…` or, with `MOCK_UPSTREAM=true`, serve
-  `src/mocks/assistant.ts` (the template's single-turn demo; removed in roadmap web 4.1).
-  `src/app/chat/page.tsx` — the chat page: a thin shell around `ChatWorkspace`, which talks to the
+- `src/app/chat/page.tsx` — the chat page: a thin shell around `ChatWorkspace`, which talks to the
   conversation routes (`/api/v1/conversations…`) through `src/lib/conversations-client.ts`.
 - `src/components/chat/` — `ChatThread`, `MessageInput`, `ChatPanel`, `ConversationList`, `ChatWorkspace` and `Sources`
   (Tailwind, RTL-tested). `Sources` is the block under an assistant message: each cited document's title with its path
@@ -124,7 +121,7 @@ URL.
 - **Working ahead of the api:** `MOCK_UPSTREAM=true` in `.env.local` makes a route serve its
   `src/mocks/<feature>.ts` fixture (`isMockUpstream()` / `mockJson` / `mockSse` in
   `src/lib/mocks.ts`); fixtures are typed against `src/lib/api-types.ts` (generated — `make
-openapi`). Example: `/api/v1/assistant/ask[/stream]` + the `/chat` page.
+openapi`). Example: `/api/v1/conversations…` + the `/chat` page (`src/mocks/conversations.ts`).
 - **UI (ADR-0010/0011):** Tailwind v4 utilities; components in `src/components/<area>/` with a
   `*.test.tsx` beside each (`// @vitest-environment jsdom`, RTL, `afterEach(cleanup)`); the
   browser-side streaming client is `src/lib/chat-client.ts` (`askStream`), SSE parsing in

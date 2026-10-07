@@ -7,6 +7,16 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-07
+
+### Removed
+
+- **The template's single-turn demo** (web roadmap 4.1, decision 18): `POST /api/v1/assistant/ask` and
+  `POST /api/v1/assistant/ask/stream` (no api route stood behind them), their fixtures `src/mocks/assistant.ts` and their
+  tests. Nothing in the UI or the api used them; the conversation routes
+  (`/api/v1/conversations/[id]/ask[/stream]`) replace them. Breaking for anyone who called the demo routes — there is
+  no such caller in this repository — hence a MINOR in the 0.x series.
+
 ## [0.6.1] — 2026-10-07
 
 ### Fixed

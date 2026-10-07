@@ -267,18 +267,28 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 4.1 — Remove the template demo
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [3.3]
 - **layers:** [bff, ui]
 - **acceptance:**
   - the template's demo is gone: `src/app/api/v1/assistant/**`, `src/mocks/assistant.ts`, the "(example)" copy and `MOCK_UPSTREAM` hint on the old `/chat` page, and any tests of them; nothing else imports them
   - `pnpm -C apps/web typecheck`, tests and a production build pass; `apps/web/CLAUDE.md` and the docs describe the conversation routes instead
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm test` in `apps/web` — expect **24 files, 524 tests** passed (532 before: the 8 tests of the deleted `assistant/routes.test.ts` are gone, nothing else changed); `pnpm typecheck` clean
+  - `pnpm build` — clean; the route list shows `/api/v1/conversations`, `/api/v1/conversations/[id]`, `…/ask`, `…/ask/stream`, `/api/ping-backend`, `/api/info-backend`, `/health`, `/chat` and **no** `/api/v1/assistant/*`. (A first build after the deletion failed only on a stale `.next/dev/types` left by an earlier `next dev`; deleting the generated `.next` folder fixed it — if you hit the same error, delete `apps/web/.next`.)
+  - `git grep -n "v1/assistant\|mocks/assistant" -- apps/web/src apps/web/e2e` returns nothing; `GET`/`POST http://localhost:3000/api/v1/assistant/ask` (with `pnpm dev`) is a Next `404`
+  - read `apps/web/CLAUDE.md` → the routes list now describes only the conversation routes, `docs/reference/http-api.md` says the demo routes were removed in 0.7.0
 - **needs_human:**
-  - confirm the file deletions before they happen (deleting files is always a stop)
+  - none — the deletions were confirmed before they happened (below)
+  - decide whether `ChatPanel` stays: no page uses it any more (`/chat` uses `ChatWorkspace`), but it is still tested and still listed in `CLAUDE.md` and ADR-0010; say so and I delete it and its test in a follow-up
+  - reply **done** to close the item, or tell me what to change
 - **notes:**
   - 2026-10-06 — planned. Decision 18.
+  - 2026-10-07 — started by Claude. Deletions confirmed by Yousef Wahid: the three `assistant` route files and `src/mocks/assistant.ts` (not `ChatPanel`).
+  - 2026-10-07 — implemented by Claude, awaiting test by Yousef Wahid. Deleted (confirmed by you): `src/app/api/v1/assistant/ask/route.ts`, `…/ask/stream/route.ts`, `…/assistant/routes.test.ts`, `src/mocks/assistant.ts`; and the generated, git-ignored `apps/web/.next` (confirmed separately). Edited: `apps/web/CLAUDE.md`, `apps/web/CHANGELOG.md` + `package.json` (0.7.0), `docs/reference/http-api.md`, `.claude/rules/30-nextjs.md`, `src/mocks/README.md`, a comment in `ChatPanel.tsx`, ADR-0010 (a dated update note), the threat model (row E4 done). Review: `code-reviewer` (a removal only, so no security review beyond the threat-model row).
+  - 2026-10-07 — DECISIONS: version 0.7.0 — a removed endpoint is a MAJOR by rule 15, but the web is 0.x and nothing in the repository called the demo routes; the "(example)" copy and the `MOCK_UPSTREAM` hint on the `/chat` page were already gone (replaced in web 2.2/3.3); `ChatPanel` kept (not named in the acceptance); the ADR was amended with a note, not rewritten.
+  - 2026-10-07 — not done, recorded: `docs/architecture/ai.md` still mentions a `/v1/assistant/ask` BFF call as a hypothetical "how to add a use case" example (template-owned guide); the web 2.2 how-to-test still mentions the "sending is not available yet" notice that 3.3 removed.
+  - 2026-10-07 — confirmed by Yousef Wahid.
 
 ### 4.2 — Switch to the generated types and turn the mocks off
 

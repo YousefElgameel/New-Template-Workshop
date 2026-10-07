@@ -69,7 +69,7 @@ openapi`); CI fails when it is stale. Type request/response shapes from it, neve
   `globals.css`) for component styling; CSS modules only when utilities can't express it.
 - Components live in `src/components/<area>/` — small, typed props, presentational where
   possible (`'use client'` only for state/effects). The chat set (`ChatThread`, `MessageInput`,
-  `ChatPanel`) is the reference shape; `src/app/chat/page.tsx` is the example page.
+  `ChatWorkspace`) is the reference shape; `src/app/chat/page.tsx` is the example page.
 - **Every component ships a test** next to it (`*.test.tsx`, `// @vitest-environment jsdom`,
   React Testing Library, `afterEach(cleanup)`); pages stay under the manual Playwright smoke.
 - A component kit (e.g. shadcn/ui) or a client-state library is a project decision — add it via
