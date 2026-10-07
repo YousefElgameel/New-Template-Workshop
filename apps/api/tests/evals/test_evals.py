@@ -21,6 +21,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,7 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import Field
 
+from app.ai.citations import invalid_citation_numbers
 from app.ai.graph import ask, build_graph, format_context
 from app.ai.prompts import load_prompt, render_prompt
 from tests.ai.fakes import FakeRetriever
@@ -70,6 +73,22 @@ def _run(case: dict, model: Any) -> tuple[Any, FakeRetriever]:
     return asyncio.run(ask(graph, case["question"])), retriever
 
 
+def forged_structure(context_part: str) -> list[str]:
+    """Lines of the rendered context that still read as a header or as the ``Context:`` marker once
+    decoration, format characters and fullwidth forms are ignored. Written without the code under
+    test, so it can disagree with it. Real headers (``[n] (``) and escaped lines are expected."""
+    found: list[str] = []
+    for line in context_part.split("\n"):
+        if line.startswith("\\") or re.match(r"^\[\d+\] \(", line):
+            continue
+        norm = unicodedata.normalize("NFKC", line)
+        norm = "".join(ch for ch in norm if unicodedata.category(ch) not in ("Cf", "Cc"))
+        norm = norm.lstrip(" \t>-*+#_|")
+        if re.match(r"\[\s*\d+\s*\](\s*\(|\s*$)", norm) or re.match(r"(?i)context\s*:", norm):
+            found.append(line)
+    return found
+
+
 def check_answer(case: dict, text: str) -> None:
     """What a good answer to ``case`` looks like (shared by the scripted and live tiers)."""
     for needle in case["expect_contains"]:
@@ -85,6 +104,9 @@ def test_eval_case(case: dict) -> None:
     assert retriever.calls and retriever.calls[0][0] == case["question"]
     check_answer(case, answer.text)
     assert answer.sources == case["expect_sources"]
+    # citations come from retrieval and only for passages the answer cites (api 4.4)
+    assert [c["source"] for c in answer.cited] == case["expect_cited"]
+    assert answer.invalid_citations == case.get("expect_invalid_citations", 0)
 
 
 @pytest.mark.skipif(LIVE, reason="records the scripted fake; the live tier has no recorder")
@@ -114,9 +136,26 @@ def test_model_receives_the_rendered_prompt_and_the_question_only(case: dict) ->
     assert system.content[len(rules) :] == format_context(case["context"])
     if not case["context"]:
         assert system.content.endswith("(no context available)")
+    # The only header lines are the code's own, numbered 1..N: no passage — injected, forged or
+    # not — can add another, or pose as the start of the context.
+    context_part = system.content[len(rules) :]
+    headers = re.findall(r"(?m)^\[(\d+)\] \(", context_part)
+    assert headers == [str(n) for n in range(1, len(case["context"]) + 1)]
+    assert not re.search(r"(?mi)^\s*context\s*:", context_part)
+    assert forged_structure(context_part) == []
     for chunk in case["context"]:
-        assert chunk["content"] in system.content
         assert chunk["content"] not in human.content
+
+
+def test_an_answer_citing_a_passage_that_does_not_exist_is_counted() -> None:
+    """A bad `[n]` is reported, never repaired and never turned into a citation."""
+    case = next(c for c in CASES if c["id"] == "injected-passage-is-ignored")
+    bad = dict(case, scripted_answer="The api listens on port 8000 [1] and [7].")
+    answer, _ = _run(bad, _scripted(bad["scripted_answer"]))
+    assert answer.invalid_citations == 1
+    assert [c["source"] for c in answer.cited] == ["docs/api.md"]
+    assert answer.text == bad["scripted_answer"]
+    assert invalid_citation_numbers(answer.text, len(case["context"])) == [7]
 
 
 def test_a_model_that_obeys_an_injected_passage_fails_the_case() -> None:
@@ -138,6 +177,7 @@ def test_cases_cover_the_three_behaviours_and_are_well_formed() -> None:
     for case in CASES:
         assert case["kind"] in KINDS
         assert case["question"].strip() and case["expect_contains"]
+        assert isinstance(case["expect_cited"], list)
     # an out-of-context case with nothing retrieved, and one with unrelated passages
     out = [c for c in CASES if c["kind"] == "out-of-context"]
     assert any(not c["context"] for c in out) and any(c["context"] for c in out)

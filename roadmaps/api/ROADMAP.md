@@ -370,6 +370,7 @@ need a human with access._
   - 2026-10-06 — from the 4.1 security review (code-side, so they belong here, not in the prompt): (1) `Answer.sources` and the `sources` frame are every retrieved chunk's source, and the `[n]` markers in the answer are never checked — validate `[n]` against the number of passages and build the stored/returned `citations` from retrieval only, never from model-written paths; (2) `format_context` inserts `content` and `source` raw, so a passage can forge a `[n] (path)` header — delimit passages unforgeably (collapse newlines in `source`, neutralise header-like lines in `content`); (3) history: map stored rows with role `user` → `HumanMessage` and `assistant` → `AIMessage` only, never a `SystemMessage` from stored text, with a test; note that `[n]` is renumbered every turn, so old `[n]` in history do not refer to this turn's passages; (4) check how the web renders answers (markdown images/links) before the first live answer.
   - 2026-10-06 — from the api 3.1 threat model (AI-5, G2, G3) and the 4.1 security review: history role mapping, output bound, retrieval timeouts and the stored-size cap moved from notes into acceptance; passage delimiting and citation checks are item 4.4, which this item now depends on. Open decision (not planned): a cap on concurrent asks, so one client cannot spend the whole quota — the BFF/ingress rate limit (G1) belongs in the web roadmap.
   - 2026-10-06 — decisions taken by Claude on the developer's instruction to follow its recommendations: (1) citations are the cited subset, not every retrieved passage; (2) a process-wide cap on concurrent asks is in this item (the BFF/ingress rate limit stays a web-layer need); (3) `trace_id` is **not** stored on message rows — it would need a new migration on tables already applied, and logs carry the id per request (revisit with auth; threat model G14, R3).
+  - 2026-10-06 — after api 4.4: `ask()` already logs `retrieved`/`cited`/`invalid` as counts — the route must not log them again, and must build the stored/returned `citations` with `cited_chunks` + `citation_of` (never from model text). `citation_of` returns one bounded line each for `title` and `path` but both are **untrusted text** (`<`, `(`, `javascript:` survive): the web must render them as plain text only (a text node, never an `href`, never markdown). `invalid_citations` is a lower bound. The security review also noted that the answer text itself is returned unrewritten, so the web must not auto-load images or render raw HTML from it.
 
 ### 4.3 — Streaming ask
 
@@ -392,10 +393,11 @@ need a human with access._
   - 2026-10-06 — planned. The web roadmap's chat item depends on this one (`api:4.3`) and on the frame shapes above.
   - 2026-10-06 — from the 1.4 security review: if a database error escapes after the stream has started (for example persisting the assistant message at the end), `UnhandledErrorMiddleware` re-raises it and the FastAPI instrumentation records `str(exc)` and the traceback on the server span — including SQL Server's own message, which can quote the text. The stream must therefore catch database errors itself and end with the bounded `error` frame, never re-raise after `http.response.start`; add a test that fails a DB write mid-stream and checks the exported server span carries no driver text.
   - 2026-10-06 — decisions taken with 4.2 (see its notes): `done` carries the cited `citations`, and streams count against the concurrency cap. **Web impact (not edited here):** web 3.1/3.2/3.3 and the hand-declared `DoneFrame` type must add `citations`, show the early `sources` list and swap it for `done.citations` — to add when planning or implementing those items.
+  - 2026-10-06 — after api 4.4: at `done`, accumulate the streamed text and call `cited_chunks` / `invalid_citation_numbers` once (same helpers as `ask()`), put the cited `citations` in the `done` frame, and log the three counts once. The streaming module does not do this yet.
 
 ### 4.4 — Unforgeable passage headers and citation checks
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [4.1]
 - **layers:** [ai]
 - **acceptance:**
@@ -404,14 +406,22 @@ need a human with access._
   - the citations that are returned or stored always come from the retrieved passages, never from text the model wrote, and are only the passages whose valid `[n]` the answer cites (a helper returns them from the answer text and the passage list)
   - offline eval cases: a passage that forges a header (the harness checks the rendered prompt, not only the scripted answer) and an answer that cites a number that does not exist
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `cd apps/api && uv run pytest tests/ai tests/evals` → all green; the whole suite `uv run pytest` → 529 passed; `uv run ruff check app tests alembic` clean (on Windows, `uv` may need to be on `PATH`)
+  - `uv run pytest tests/ai/test_ai_citations_context.py -v` → the test names list what is covered: citation parsing, fence rules, bogus numbers, every lookalike header and `Context:` form that must be escaped, and the ordinary lines that must not be
+  - `uv run pytest tests/ai/test_ai_citations_context.py -k long_runs -v` → 2 passed in well under a second (the old fence regex needed about a second for 4,000 backticks and minutes for 100,000)
+  - `uv run pytest tests/evals -v` → every eval case now also checks its rendered header lines and its cited documents; read the new case `decorated-and-fullwidth-headers-are-escaped` in `tests/evals/cases.json`
+  - read the "Known limits" section of the 0.7.0 entry in `apps/api/CHANGELOG.md`
 - **needs_human:**
-  - none
+  - nothing blocks the next item. For later: the live eval (api 5.3) is what shows how a real model copes with the forged headers; and whoever builds the web display of citations (web 3.x) must render `title` and `path` as plain text only — see the notes
 - **notes:**
   - 2026-10-06 — planned from the api 3.1 threat model (S6, AI-2, AI-3) and the 4.1 security review, which found that `format_context` inserts passages raw and that `[n]` markers are never checked. Changes `app/ai/graph.py`; the prompt (4.1) is unchanged. Open design point for 4.3: the stream sends `sources` (all retrieved passages) before the first token, so the web page shows every retrieved source, not only the cited ones; whether to narrow the stored citations to the cited numbers is a product decision to make then.
   - 2026-10-06 — design point settled (see 4.2 notes): stored/returned citations are the cited subset; the stream's early `sources` frame stays all retrieved.
+  - 2026-10-06 — started by Claude.
+  - 2026-10-06 — implemented by Claude. Files: `app/ai/citations.py` (new), `app/ai/graph.py` (`format_context`, `_header_source`, `_neutralise`, `Answer.cited`/`invalid_citations`, one log line), tests `tests/ai/test_ai_citations_context.py` (new) + `tests/evals/test_evals.py` and `cases.json` (`expect_cited`, an independent header check, a decorated-headers case), `docs/architecture/ai.md`, `.claude/rules/70-ai.md`, api `CLAUDE.md`, CHANGELOG, api 0.7.0. Reviews: code-reviewer and security-reviewer. Both found the same real defect: the first version used a regex for code fences that was quadratic-to-cubic (1 s at 4,000 backticks) and would stall the event loop; it is now a linear line scanner with a 200,000-character cap and tests that fail fast on a regression. Also fixed: lookalike headers behind quote/list marks, zero-width or bidi characters, fullwidth forms and bare `[2]` lines; ASCII-only digits; a set for seen markers; the version (MINOR) and the over-claimed changelog. Mutation-checked: 50 mutations over three rounds, all caught (one run was interrupted because the deliberately reintroduced regex hung the suite; that test now fails in seconds). Accepted limits are listed in the CHANGELOG ("Known limits").
 
 ## Phase 5 — Hardening
+
+- 2026-10-07 — confirmed by Yousef Wahid (ran the offline tests on their machine: 222 passed for `tests/ai` + `tests/evals`, and the long-run test passed in under a second). The live eval tier has not been run.
 
 ### 5.1 — Dev smoke runbook
 

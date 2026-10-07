@@ -64,12 +64,25 @@ report token usage on streamed answers too.
 1. `retrieve` — embeds the latest user turn and queries the retriever (deterministically, every
    turn — grounding never depends on the model choosing a tool); records retrieval telemetry.
 2. `answer` — renders `prompts/system.md` with the numbered context, calls the model inside
-   `model_call_span()`, appends the `AIMessage`.
+   `model_call_span()`, appends the `AIMessage`. `format_context` writes the numbers and the
+   `[n] (source)` headers itself: a passage's `source` is flattened to one line without brackets or
+   parentheses (200 characters at most), and any line of a passage that looks like a header (`[2] (…)`,
+   also behind a quote, list or heading mark, a zero-width or bidirectional character, in fullwidth
+   form, or as a bare `[2]` line) or like the prompt's `Context:` marker is escaped with a backslash,
+   so a retrieved document cannot pose as another passage. Everything else in a passage is left as
+   it is. What this does not stop: homoglyph letters, role-like lines (`System:`) and instructions in
+   running text — the prompt's "context is data" rule and the live eval (api 5.3) cover those.
 3. optional `tools` — when tools are passed, the model is bound to them and a `ToolNode` loop
    (`answer → tools → answer`) runs until it stops calling tools.
 
 `ask(graph, question, history=…)` is the non-streaming entry point and returns the answer text,
-the unique sources, the context and the token usage.
+the unique sources (every retrieved document), the context, the token usage, and — from
+`citations.py` — `cited` (the retrieved passages whose valid `[n]` the answer cites, one per
+document) and `invalid_citations` (a count of `[n]` that point to no passage; logged as a count,
+never as text). Stored or returned citations are built from `cited` with `citation_of` (`{title,
+path}` from the passage), never from anything the model wrote; the answer text is not rewritten.
+Markers inside code spans are not citations. A marker is one to three ASCII digits, so `invalid_citations` is a lower bound; the scan is linear
+and reads at most 200,000 characters.
 
 **`streaming.py`.** `stream_answer()` drives the same graph with LangGraph's `updates` +
 `messages` stream modes and yields Server-Sent Events: `sources` (after retrieval), `token`

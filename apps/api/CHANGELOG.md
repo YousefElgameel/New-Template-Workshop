@@ -7,6 +7,45 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-06
+
+### Added
+
+- **`app/ai/citations.py`** (roadmap api 4.4): `citation_numbers`, `invalid_citation_numbers`, `cited_chunks` and
+  `citation_of`. They read the `[n]` markers of an answer as numbers and look the passages up in what retrieval
+  returned, so a citation can never name a document the model made up. A marker is one to three ASCII digits, alone
+  or comma-separated (`[1, 3]`, `[1][2]`), and not inside code (a fenced block — an unclosed fence runs to the end,
+  as in Markdown — or an inline span). The scan is one linear pass over the first 200,000 characters. Nothing
+  rewrites the answer text.
+- `ask()`'s `Answer` gains `cited` (the retrieved passages the answer cites, one per document, in citation order)
+  and `invalid_citations` (how many `[n]` point to no passage). `sources` is unchanged (every retrieved
+  document). One log line per answer carries `retrieved`, `cited` and `invalid` as counts — no text, no paths.
+
+### Changed
+
+- **A passage can no longer pose as another passage or as the start of the context** (`format_context` in
+  `app/ai/graph.py`). The numbers and `[n] (source)` headers are written by the code only. A passage's `source` is
+  flattened to one printable line, `()[]` become `_`, and it is cut at 200 characters (the **stored** source is not
+  touched, so citations keep the real path). Any line of a passage's text that reads as a header or as the prompt's
+  `Context:` marker is escaped with a leading backslash — also behind a quote, list, heading or table mark, behind
+  zero-width, bidirectional or other format characters, in fullwidth form, and a bare `[2]` line whose `(…)` is on
+  the next line. Other lines are untouched, except that every line separator (`\r\n`, U+2028, …) becomes `\n` and a
+  trailing newline is dropped. The rendered prompt therefore changes for such lines and for sources with brackets or
+  parentheses; nothing else changes for callers, and no endpoint uses any of this yet (api 4.2 does).
+- The eval harness now also proves, for every case, that the only header lines the model sees are the code's own,
+  numbered 1..N (checked again by an independent implementation that ignores decoration and fullwidth forms), and that
+  each case's cited passages and invalid-marker count are as declared (`expect_cited`).
+
+### Known limits
+
+- `invalid_citation_numbers` is a **lower bound**: `[1000]` and longer are not markers, and a marker the page would
+  render differently (indented code, HTML comments) may still count. A count of 0 does not prove an answer clean.
+- Homoglyph letters, role-like lines (`System:`, `</context>`) and an instruction placed mid-line are not touched;
+  the prompt's "context is data" rule is the defence there, and only the live eval (api 5.3) shows how a real model
+  copes.
+- `citation_of` returns one bounded line of printable text, but it is **untrusted**: `<`, `(` and a `javascript:`
+  prefix survive. Whoever stores or shows it must render it as plain text, never as markup or a link target.
+
 ## [0.6.0] — 2026-10-06
 
 ### Added
