@@ -521,7 +521,7 @@ need a human with access._
 
 ### 5.5 — Request-size cap in the api
 
-- **status:** todo
+- **status:** done
 - **depends_on:** []
 - **layers:** [endpoint]
 - **acceptance:**
@@ -530,11 +530,29 @@ need a human with access._
   - the limit is documented in `.env.example` and `environment-variables.md`
   - tests: a body over the limit with and without `Content-Length`, a body just under it, a streamed body with no length, and no effect on a normal ask
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `cd apps/api && uv run pytest tests/test_body_limit.py` → **45 passed**; the whole suite `uv run pytest` → **839 passed, 4 skipped** (the 4 are the ingest symlink tests); `uv run ruff check app tests alembic` clean (on Windows, `uv` may need to be on `PATH`)
+  - against the running api (`uv run uvicorn app.main:app --port 8000`; no Azure settings are needed for these): a 70 KB body is refused whichever way it arrives — I ran both —
+    ```
+    python -c "import sys; sys.stdout.write('{\"question\":\"' + 'q'*70000 + '\"}')" > big.json
+    curl -i -X POST http://localhost:8000/v1/conversations/5b1f3a52-8c1e-4d3a-9d0b-1a2b3c4d5e01/ask -H "content-type: application/json" --data-binary @big.json
+    curl -i -X POST http://localhost:8000/v1/conversations/5b1f3a52-8c1e-4d3a-9d0b-1a2b3c4d5e01/ask -H "content-type: application/json" -H "transfer-encoding: chunked" --data-binary @big.json
+    ```
+    both answer `413` with `{"error":"payload_too_large","trace_id":"…"}` and an `x-trace-id` header equal to that id (the first carries `connection: close`); `curl -i http://localhost:8000/ping` is still `200`
+  - lower the limit and watch it move: `MAX_REQUEST_BODY_BYTES=100` in `apps/api/.env`, restart, and `curl -i -X POST http://localhost:8000/v1/conversations -H "content-type: application/json" -d '{"title":"a title that is well over a hundred bytes long, repeated: ... ... ... ... ... ... ... ..."}'` is `413`, a short `{"title":"x"}` is not; remove the line afterwards
+  - the logs show one line per refusal, `request body refused kind=declared` or `kind=streamed` — no size, no path, no body
+  - prove the tests bite: in `app/body_limit.py` ignore the declared length, the streamed count (or make it per chunk instead of cumulative), the exemption of `/ping`/`/info`/`/health`, the `root_path` strip or the largest-of-repeated-lengths rule; in `app/main.py` drop the middleware; in `app/config.py` let `0`, a typo or a huge value through: the matching tests fail (17 such changes tried, all caught)
 - **needs_human:**
-  - decide whether the ingress (when one exists) should also cap request sizes; the api cap is a second line of defence
+  - decide whether the ingress (when one exists) should also cap request sizes; the api cap is a second line of defence (Container Apps ingress has no request-size setting of its own that I know of — check with the cloud team)
+  - decide whether the api needs a **read deadline** for slow bodies: the cap bounds size, not speed, and uvicorn has no body-read timeout, so a client that trickles bytes holds a connection until the ingress's 240 s limit; locally and in compose nothing bounds it. I did not add one (it is a separate change to how the server is run); say so and I will plan an item
+  - reply **done** to close the item, or tell me what to change
 - **notes:**
   - 2026-10-07 — planned from the api 4.2 security review: FastAPI reads and parses the whole body before a route's own check runs (so `413` for a long question arrives only after the body is in memory several times over). The BFF caps its own requests (web roadmap 3.1), but the api may also be reached directly (threat model S3).
+  - 2026-10-07 — started by Claude.
+  - 2026-10-07 — implemented by Claude, awaiting test by Yousef Wahid. Files: `app/body_limit.py` (new: `BodyLimitMiddleware`, `BodyTooLarge`), `app/main.py` (wiring: Trace → BodyLimit → UnhandledError), `app/config.py` (`MAX_REQUEST_BODY_BYTES`, `read_body_limit`), `tests/test_body_limit.py` (new, 45 tests), `.env.example`, `docker-compose.yml`, `docs/reference/environment-variables.md` and `http-api.md`, api `CLAUDE.md`, `CHANGELOG.md` + `pyproject.toml` + `uv.lock` (0.11.0). Reviews: `security-reviewer` and `code-reviewer`, both run; the findings below were verified before acting. Also run for real: the api started locally and both a declared and a chunked 70 KB body answered `413` with the contract body.
+  - 2026-10-07 — fixed after review: **MEDIUM** — the cap only looked at paths starting `/v1/`, so a server started with a `root_path` skipped it, `/v1` itself and the next API version (`/v2`) were uncapped, and so was anything added later: every route is capped now except the three operational ones, compared without the `root_path`; a repeated `Content-Length` counts as its largest; a value above 1 MiB for the setting is the default (a huge value switches the cap off in practice); the declared-length refusal says `connection: close`; the log is info, not warning (an unauthenticated client could otherwise produce warnings at request rate); the changelog claimed uvicorn bounds a slow body — it does not, now worded accurately; a few weak or duplicated tests removed or tightened.
+  - 2026-10-07 — DECISIONS: the limit is 64 KB because the largest legitimate body is a 4,000-character question, about 48 KB when every character is a JSON surrogate-pair escape, and the web BFF caps its requests at the same 64 KiB (keep `MAX_REQUEST_BODY_BYTES` at or above about 48 KB); the setting is read once when the app is created (a change needs a restart); version 0.11.0 (MINOR: a new limit, backward compatible for any body under 64 KB).
+  - 2026-10-07 — not done, recorded: a read deadline for slow bodies (above); `POST /v1/conversations` does not declare a `413` response in the OpenAPI schema (only the ask routes do; the behaviour is the same on every route) — declaring it everywhere would mean regenerating `docs/reference/openapi.json` and the web's generated types, which I left for web 4.2.
+  - 2026-10-07 — confirmed by Yousef Wahid.
 
 ### 5.6 — Fit the ask deadline inside the ingress limit
 

@@ -4,8 +4,9 @@ Bootstrap order matters:
     1. Configure structlog FIRST (so all later logs are structured JSON).
     2. Initialize observability (fail-safe) — Azure Monitor + OTEL.
     3. Install the error contract (app/errors.py): exception handlers + the
-       catch-all UnhandledErrorMiddleware, then TraceMiddleware OUTSIDE it so a
-       500 still carries the request's trace id (x-trace-id lifecycle).
+       catch-all UnhandledErrorMiddleware, the /v1 request-size cap
+       (app/body_limit.py) around it, then TraceMiddleware OUTSIDE both so a
+       500 or a 413 still carries the request's trace id (x-trace-id lifecycle).
     4. Include routers: operational (/ping, /health, /info) unversioned, plus the
        mandatory /v1 business router (ADR-0001).
     5. On startup, emit the degraded-mode WARNING if observability is disabled.
@@ -27,6 +28,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.body_limit import BodyLimitMiddleware
 from app.config import get_settings, load_local_env
 from app.db import dispose_engine
 from app.errors import UnhandledErrorMiddleware, install_error_handlers
@@ -85,6 +87,9 @@ def create_app() -> FastAPI:
     #    (Starlette wraps in reverse order of add_middleware calls).
     install_error_handlers(app)
     app.add_middleware(UnhandledErrorMiddleware)
+    # The request-size cap sits between them: a refusal still carries the trace id, and an
+    # oversized body is refused before anything downstream buffers it (api 5.5).
+    app.add_middleware(BodyLimitMiddleware, max_bytes=get_settings().max_request_body_bytes)
     app.add_middleware(TraceMiddleware)
 
     # 4. Routes: operational (unversioned) + the mandatory /v1 business surface.

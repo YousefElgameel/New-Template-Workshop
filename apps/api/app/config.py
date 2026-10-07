@@ -39,6 +39,9 @@ def load_local_env(path: Path | None = None) -> bool:
 SERVICE_NAME = "api"
 DEFAULT_OTEL_SERVICE_NAME = "team-assistant-api"
 DEFAULT_PORT = 8000
+DEFAULT_MAX_REQUEST_BODY_BYTES = 64 * 1024
+# A larger value is a mistake (it would switch the cap off in practice): the default applies.
+MAX_REQUEST_BODY_BYTES_CEILING = 1024 * 1024
 # Distribution name as declared in pyproject.toml ([project].name).
 DISTRIBUTION_NAME = "team-assistant-api"
 # Placeholder DATABASE_URL — Azure SQL Database via the `mssql+aioodbc` dialect
@@ -118,6 +121,8 @@ class Settings:
     # Optional READ-ONLY external database (mssql+aioodbc://…), read lazily by
     # app.db.external. None = not configured (the external engine refuses to build).
     external_database_url: str | None
+    # Largest /v1 request body in bytes (app.body_limit; MAX_REQUEST_BODY_BYTES).
+    max_request_body_bytes: int = DEFAULT_MAX_REQUEST_BODY_BYTES
 
     @property
     def has_connection_string(self) -> bool:
@@ -137,6 +142,17 @@ def _read_port(raw: str | None) -> int:
         return DEFAULT_PORT
 
 
+def read_body_limit(raw: str | None) -> int:
+    """A positive integer up to 1 MiB; anything else means the default (never \"no cap\")."""
+    if raw is None or not raw.strip():
+        return DEFAULT_MAX_REQUEST_BODY_BYTES
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return DEFAULT_MAX_REQUEST_BODY_BYTES
+    return value if 0 < value <= MAX_REQUEST_BODY_BYTES_CEILING else DEFAULT_MAX_REQUEST_BODY_BYTES
+
+
 def get_settings() -> Settings:
     """Build a Settings snapshot from the current environment."""
     return Settings(
@@ -150,4 +166,5 @@ def get_settings() -> Settings:
         database_url=os.getenv("DATABASE_URL") or DEFAULT_DATABASE_URL,
         # Empty/missing = no external database; there is deliberately no placeholder.
         external_database_url=(os.getenv("EXTERNAL_DATABASE_URL") or "").strip() or None,
+        max_request_body_bytes=read_body_limit(os.getenv("MAX_REQUEST_BODY_BYTES")),
     )

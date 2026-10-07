@@ -7,6 +7,35 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-07
+
+### Added
+
+- **A request-size cap on every route but the operational ones** (`app/body_limit.py`; roadmap api 5.5): a body larger than
+  `MAX_REQUEST_BODY_BYTES` (default **64 KB**) is refused with `413 payload_too_large` and the standard
+  `{ error, trace_id }` body, **before it is buffered** — FastAPI parses a whole body before a route's own check runs,
+  so the `413` for a too-long question used to arrive only after the body was in memory several times over. A
+  `Content-Length` above the limit is answered at once without reading the body; a body that declares no length (a
+  chunked upload) is counted as it streams and cut off when it crosses the limit. One pure-ASGI middleware between
+  `TraceMiddleware` and `UnhandledErrorMiddleware`, so the `413` carries the request's trace id in the body and the
+  echoed header. `/ping`, `/info` and `/health` take no body and are left out; everything else — every `/v1` route, the
+  next API version, anything added later — is capped, and a server started with a `root_path` cannot slip past it. A
+  repeated `Content-Length` counts as its largest value, and a refusal on the declared length says
+  `connection: close`. The log line (info level) carries the kind of refusal (`declared` or `streamed`), never a size,
+  a path or content; the refusal is also a 413 in the request metrics.
+  - `MAX_REQUEST_BODY_BYTES` is read once, when the app is created (a change needs a restart). A mistyped, empty or
+    non-positive value — or one above 1 MiB — is the default, never "no cap". The largest legitimate body is a 4,000-character question,
+    about 48 KB in the worst JSON-escaped case (every character a surrogate-pair escape), so 64 KB fits it; the web BFF
+    caps its own requests at the same 64 KiB.
+
+### Known limits
+
+- A size cap bounds size, not speed. A client that sends bytes slowly holds a connection until it stops or the
+  ingress gives up (Azure Container Apps: a fixed 240 s request timeout); uvicorn has no read deadline of its own, so
+  locally and in compose nothing bounds it. The BFF's 5 s body read timeout covers only requests that come through
+  the BFF. A read deadline in the api is not planned yet.
+- A route that never reads its body is not affected by a streamed one (nothing is buffered).
+
 ## [0.10.0] — 2026-10-07
 
 ### Changed

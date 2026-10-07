@@ -11,7 +11,7 @@ this as a starting map; read the actual files when you need detail.
 
 - `main.py` — app factory + module-level `app` (so `uvicorn app.main:app` works). Bootstrap
   order: configure **structlog first** → `init_observability` (fail-safe) → `install_error_handlers`
-  + `UnhandledErrorMiddleware` → add `TraceMiddleware` (outermost) → include routers. The lifespan hook logs the degraded WARNING at startup if disabled and
+  + `UnhandledErrorMiddleware` → `BodyLimitMiddleware` (the `/v1` request-size cap) → add `TraceMiddleware` (outermost) → include routers. The lifespan hook logs the degraded WARNING at startup if disabled and
   awaits `dispose_engine()` on shutdown.
 - `routers/conversations.py` — `/v1/conversations`: `POST` start, `GET` list, `GET /{id}` open (schemas live in
   the module; the endpoint owns the unit of work — it commits the one write, the repository never does; a read
@@ -24,6 +24,7 @@ this as a starting map; read the actual files when you need detail.
   `/health` adds `status`, `observability`, `reason`; `/info` → consolidated
   `{status, service, version, env, uptime_seconds, runtime, system, observability, reason,
   trace_id}`, version via `config.get_version()` / `importlib.metadata`).
+- `body_limit.py` — `BodyLimitMiddleware`: a body over `MAX_REQUEST_BODY_BYTES` (64 KB, ceiling 1 MiB) on any route but `/ping`, `/info`, `/health` is a `413 payload_too_large` before it is buffered (`Content-Length` checked at once, a chunked body counted while it streams via `BodyTooLarge`, an `HTTPException`); `read_body_limit` (in `config.py`) makes a mistyped value the default, never "no cap".
 - `errors.py` — **the error contract**: every non-2xx body is `{error, trace_id}` (`ErrorBody`);
   raise `ApiError` subclasses (`NotFound`, `Conflict`, `AIUnavailable`, or your own with a
   snake_case code); handlers map `HTTPException`/`RequestValidationError`/`AINotConfigured`;

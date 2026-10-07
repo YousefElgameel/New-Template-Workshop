@@ -197,7 +197,8 @@ Source: `apps/api/app/routers/ask.py` (roadmap api 4.2). The answer is written f
 
 - **`question`** — trimmed; not blank; at most **4,000 characters** (characters, not bytes); no NUL character and
   no invalid text (a lone surrogate from a JSON `\ud800` escape). A blank, missing or wrong-typed field is
-  `422 validation_error`; over the limit is `413 payload_too_large`. The body is read before it is checked, so
+  `422 validation_error`; over the limit is `413 payload_too_large`. Every request body (all routes but the
+  operational ones) is also capped at `MAX_REQUEST_BODY_BYTES` (64 KB by default) before it is buffered, so an oversized body is a `413` without being read;
   the BFF caps the request size too.
 - **`citations`** — the retrieved documents whose `[n]` the answer cites, each once, in citation order; `[]` when
   it cites none (for example "I do not know"). They are built from what retrieval returned, never from text the
@@ -351,17 +352,17 @@ and the same trace id in the `x-trace-id` header:
 { "error": "not_found", "trace_id": "0c70…" }
 ```
 
-| Situation                                      | Status  | `error`                                                                                   |
-| ---------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
-| unknown route                                  | 404     | `not_found`                                                                               |
-| wrong method                                   | 405     | `method_not_allowed` (+ `Allow` header)                                                   |
-| request body/query fails validation            | 422     | `validation_error` — fields logged, not echoed                                            |
-| `raise NotFound()` / `Conflict("<code>")`      | 404/409 | the class code or the one given                                                           |
-| `raise HTTPException(403, detail="read_only")` | 403     | `read_only` (a snake_case `detail` is the code; prose maps to the default for the status) |
-| a request body over a route's size limit       | 413     | `payload_too_large`                                                                       |
-| too many AI calls at once (`ask`)              | 429     | `busy`                                                                                    |
-| model/search not configured or unavailable     | 503     | `ai_unavailable`                                                                          |
-| anything else                                  | 500     | `internal_error` — kind + location logged only                                            |
+| Situation                                                                                                              | Status  | `error`                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
+| unknown route                                                                                                          | 404     | `not_found`                                                                               |
+| wrong method                                                                                                           | 405     | `method_not_allowed` (+ `Allow` header)                                                   |
+| request body/query fails validation                                                                                    | 422     | `validation_error` — fields logged, not echoed                                            |
+| `raise NotFound()` / `Conflict("<code>")`                                                                              | 404/409 | the class code or the one given                                                           |
+| `raise HTTPException(403, detail="read_only")`                                                                         | 403     | `read_only` (a snake_case `detail` is the code; prose maps to the default for the status) |
+| a request body over a route's size limit, or over `MAX_REQUEST_BODY_BYTES` (any route but `/ping`, `/info`, `/health`) | 413     | `payload_too_large`                                                                       |
+| too many AI calls at once (`ask`)                                                                                      | 429     | `busy`                                                                                    |
+| model/search not configured or unavailable                                                                             | 503     | `ai_unavailable`                                                                          |
+| anything else                                                                                                          | 500     | `internal_error` — kind + location logged only                                            |
 
 Codes are stable identifiers the BFF and UI can switch on; messages, validation values and stack
 traces never leave the api (rule 50). Streaming routes emit `event: error` with a bounded
