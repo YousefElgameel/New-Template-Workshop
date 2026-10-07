@@ -19,7 +19,7 @@ cannot forward (JSON accept header, 10 s timeout, buffered read).
 
 We adopt **Tailwind CSS v4** (via `@tailwindcss/postcss`, `@import 'tailwindcss'` in
 `globals.css`) as the styling foundation and ship a **small set of hand-written chat
-components** in `src/components/chat/` (`ChatThread`, `MessageInput`, `ChatPanel`) plus a
+components** in `src/components/chat/` (`ChatThread`, `MessageInput`, `ChatPanel`; `ChatPanel` was removed in web 0.7.1) plus a
 framework-free browser client (`src/lib/chat-client.ts`) and SSE helpers (`src/lib/sse.ts`).
 The BFF forwards streams with **`streamUpstream` + `proxyStream`** (`src/lib/stream.ts`, a
 5-minute whole-answer bound, `x-trace-id` forwarded). **`MOCK_UPSTREAM=true`** (server-side,

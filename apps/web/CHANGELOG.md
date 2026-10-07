@@ -7,6 +7,14 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-07
+
+### Removed
+
+- **`ChatPanel`** (`src/components/chat/ChatPanel.tsx` and its test): the template's single-turn streaming chat surface.
+  No page used it since `/chat` moved to `ChatWorkspace` (web 2.2/3.3), and what it exercised — `askStream` — is covered
+  by `chat-client.test.ts` and `ChatWorkspace.test.tsx`. Deleted at Yousef Wahid's request. Nothing imported it.
+
 ## [0.7.0] — 2026-10-07
 
 ### Removed

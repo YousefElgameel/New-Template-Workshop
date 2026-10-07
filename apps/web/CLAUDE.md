@@ -46,7 +46,7 @@ URL.
   `startSpanHook`); fail-safe, tested with an in-memory exporter. Any new id-bearing route is covered if its ids are UUIDs.
 - `src/app/chat/page.tsx` — the chat page: a thin shell around `ChatWorkspace`, which talks to the
   conversation routes (`/api/v1/conversations…`) through `src/lib/conversations-client.ts`.
-- `src/components/chat/` — `ChatThread`, `MessageInput`, `ChatPanel`, `ConversationList`, `ChatWorkspace` and `Sources`
+- `src/components/chat/` — `ChatThread`, `MessageInput`, `ConversationList`, `ChatWorkspace` and `Sources`
   (Tailwind, RTL-tested). `Sources` is the block under an assistant message: each cited document's title with its path
   beside it, as **plain text** (they are untrusted indexed text: no markup, no links), not numbered (the `[n]` in an answer
   are passage numbers, not list positions); nothing is drawn when there are none.
