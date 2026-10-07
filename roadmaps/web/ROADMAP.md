@@ -263,6 +263,39 @@ conversation surface (decision 18) — the removal is item 4.1._
   - 2026-10-07 — version 0.6.0 (MINOR: new behaviour on `/chat`, backward compatible).
   - 2026-10-07 — confirmed by Yousef Wahid.
 
+### 3.4 — Limits on asks at the BFF
+
+- **status:** todo
+- **depends_on:** [3.1]
+- **layers:** [bff]
+- **acceptance:**
+  - the ask routes (`POST /api/v1/conversations/[id]/ask` and `…/ask/stream`) refuse with `429 busy` (the api's own error shape, `{ error, trace_id }`, `x-trace-id` echoed) when this instance already has 8 asks in flight, or the client already has 2 — the client being the rightmost `X-Forwarded-For` address (Container Apps sets it; the others are client-controlled and are ignored), else one shared bucket; a slot is released on every exit path, including the browser leaving mid-stream
+  - the write routes of the conversation BFF (`POST …/conversations`, `…/ask`, `…/ask/stream`) refuse a request whose `Origin` is present and not the app's own origin, or whose `Sec-Fetch-Site` is `cross-site` (`403 invalid_origin`); a request without either header (curl, tests) still passes
+  - limits are configurable by server-side env vars with documented defaults (`ASK_MAX_INFLIGHT`, `ASK_MAX_INFLIGHT_PER_CLIENT`) in `.env.example` and `environment-variables.md`; the counters are never logged with an address (counts only)
+  - tests for each limit and its release (normal end, error, abort), the address choice, the origin cases, and that a normal ask is unaffected; works against `MOCK_UPSTREAM=true`
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - for the stronger control, ask the cloud team for **ingress IP restrictions** (an allow-list of the company networks) on the web container app — nothing in this repository can set it (platform tier, ADR-0012)
+- **notes:**
+  - 2026-10-07 — planned from the proposed decisions of the threat model §8a (G1, G4): proposed by Claude on Yousef Wahid's instruction to decide. The numbers are defaults chosen here (the api allows 4 asks at once, so 8 per instance leaves room for one browser tab each and a retry); change them in the item if the team prefers other values.
+
+### 3.5 — Shared-chats notice and security headers
+
+- **status:** todo
+- **depends_on:** [3.3]
+- **layers:** [ui, bff]
+- **acceptance:**
+  - the chat page shows, near the input, one short line: "Chats are shared with the team. Do not enter personal data." (plain text; present in every state of the page; covered by a component test)
+  - every response of the web app carries `Content-Security-Policy` (`default-src 'self'`; `script-src` as Next needs it, with a nonce or hash rather than `unsafe-inline` where the framework allows; `img-src 'self'`; `connect-src 'self'`; `frame-ancestors 'none'`; `base-uri 'self'`; `form-action 'self'`), `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` and `Permissions-Policy` with the sensors off; set in `next.config.ts` (or `proxy`), tested, and the page still loads and streams under it (a production build is exercised, not only unit tests)
+  - the headers and the notice are described in `apps/web/CLAUDE.md` and `docs/reference/http-api.md`
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - open `/chat` in a browser after a production build and confirm the console shows no CSP violation while a question streams
+- **notes:**
+  - 2026-10-07 — planned from the proposed decisions of the threat model §8a (G5, G11): proposed by Claude on Yousef Wahid's instruction to decide.
+
 ## Phase 4 — Cleanup and go-live
 
 ### 4.1 — Remove the template demo

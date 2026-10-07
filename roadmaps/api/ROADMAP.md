@@ -263,6 +263,7 @@ need a human with access._
   - `x-admin-key`, `admin_key` and `ingest_admin_key` are on the log redaction list, with a test that a log line carrying each shows `[redacted]`
   - `docs/operations/runbooks/` has a short procedure to rotate the key (set the new value, restart, check the old key now gets `401`)
   - an unexpected failure of the background run is reported by a bounded error kind in the log and the outcome event, never by the exception text (which can carry service URLs or response bodies)
+  - the corpus has a size cap: a run over 1,000 files or 50 MB in total refuses before it embeds anything (a clear one-line reason, nothing uploaded or removed); the numbers are configurable and documented (threat model decision G7)
 - **how_to_test:**
   - _(filled in by `/implement-next`)_
 - **needs_human:**
@@ -274,6 +275,7 @@ need a human with access._
   - 2026-10-06 — planned. Delegate to `observability-instrumenter` for the event.
   - 2026-10-06 — from the api 3.1 threat model (S5, G8, G13): key hardening and the redaction entries added to acceptance; now also depends on 3.5 (ingest hygiene). The 32-character minimum is a default chosen here — change it if the team prefers another.
   - 2026-10-06 — from the api 3.2 security review: the CLI prints a traceback for unexpected errors, which is fine for a person at a terminal; the endpoint must not.
+  - 2026-10-07 — proposed decisions of the threat model §8a (Claude, on Yousef Wahid's instruction to decide; ADR-0015 is still for him to accept): the corpus-size cap above was added (G7); the runtime and the ingest job use separate Search identities in the deployed environment (G13) — a request for the cloud team, not authored here.
   - 2026-10-07 — from the api 4.2 security review: the api has no request-size cap (item 5.5); the ingest route takes no body, so it is not affected, but any admin route added later should not rely on the BFF to cap sizes.
 
 ### 3.4 — Corpus baked into the api image
@@ -533,3 +535,50 @@ need a human with access._
   - decide whether the ingress (when one exists) should also cap request sizes; the api cap is a second line of defence
 - **notes:**
   - 2026-10-07 — planned from the api 4.2 security review: FastAPI reads and parses the whole body before a route's own check runs (so `413` for a long question arrives only after the body is in memory several times over). The BFF caps its own requests (web roadmap 3.1), but the api may also be reached directly (threat model S3).
+
+### 5.6 — Fit the ask deadline inside the ingress limit
+
+- **status:** todo
+- **depends_on:** []
+- **layers:** [ai]
+- **acceptance:**
+  - the default `AI_MAX_RETRIES` is 1 (was 2), so one answer's worst case — the model's timeout times (retries + 1), plus the two retrieval steps — is 180 s at the other defaults, inside the 240 s request timeout of Azure Container Apps ingress; the worst case is computed in one place (not repeated as a number in several) and covered by a test that fails if the defaults add up to more than 220 s
+  - `docs/reference/http-api.md`, `.env.example`, `environment-variables.md`, `apps/api/CLAUDE.md` and `.claude/rules/70-ai.md` give the new defaults and say why; the web BFF's 5 minute hop timeout is left as an upper bound
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-07 — planned from the ingress timeout decision of the threat model §8a (Azure Container Apps ingress: fixed 240 s request timeout, not configurable). Proposed by Claude on Yousef Wahid's instruction to decide; a project that wants more retries can set the variable and accepts the limit.
+
+### 5.7 — Secret scan of the corpus in CI
+
+- **status:** todo
+- **depends_on:** []
+- **layers:** [docs]
+- **acceptance:**
+  - a CI job (in `.github/workflows/ci.yml`, on every pull request) scans `docs/**/*.md` for credentials — private key blocks, `AKIA…` and similar cloud key shapes, `ghp_`/`github_pat_` tokens, `sk-` style keys, JWT-shaped strings, connection strings with a password, long high-entropy values next to `key`/`secret`/`token`/`password` — and fails the build with the file and line **kinds** only (never the value)
+  - an allow-list file for known false positives (placeholders such as `00000000-0000-…` and `<your-key>`), reviewed in the same pull request that adds to it
+  - the scan's patterns are tested with a few fake secrets and a few look-alikes (offline, in the api's or a script's test suite), and the job is described in `docs/reference/commands.md` and the threat model (G7)
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-07 — planned from the threat model §8a (G7): the corpus stays `docs/**/*.md`, and the scan is the control. Proposed by Claude on Yousef Wahid's instruction to decide. A real secret scanner (a maintained tool) is preferable to hand-written patterns if the team already uses one; that is a stack decision to confirm when this item starts.
+
+### 5.8 — Conversation purge runbook
+
+- **status:** todo
+- **depends_on:** [1.2]
+- **layers:** [docs]
+- **acceptance:**
+  - `docs/operations/runbooks/` has a procedure to remove one conversation (or all conversations older than a date) from the Azure SQL database by hand — the exact reviewed statements (parameterised, deleting messages before the conversation), the permission needed, how to check the result, and the reminder that the stored data are shared and may hold personal data (ADR-0014)
+  - it says whether `pii-purge.md` covers the database (it covers telemetry) and links the two; it states the retention decision: none automatic for now, revisit when auth lands
+  - no statement is run by an agent; the runbook is reviewed like any runbook (`runbook-writer`)
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - a person with write access to the database runs it when a removal is requested
+- **notes:**
+  - 2026-10-07 — planned from the threat model §8a (G11): proposed by Claude on Yousef Wahid's instruction to decide.

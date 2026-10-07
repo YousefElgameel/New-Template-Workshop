@@ -234,7 +234,7 @@ counts, a boolean for "answer was cut", and a bounded error kind.
 **Timing.** A normal answer takes a few seconds. The bounds: the model call has a 60 s timeout per attempt and 2
 retries (`AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_RETRIES`), the query embedding and the search each have 30 s
 (`AI_RETRIEVAL_TIMEOUT_SECONDS`), the answer is at most `AI_MAX_OUTPUT_TOKENS` (1,024) tokens. The worst case is
-therefore about **4 minutes**; whatever calls this route must wait longer than that (the BFF's default 10 s
+therefore about **4 minutes**, and Azure Container Apps ingress has a fixed **240 s** request timeout that this repository cannot raise: the page uses the streaming route (its first bytes arrive within seconds), and roadmap api 5.6 brings the worst case to 180 s by lowering the default retries; whatever calls this route must wait longer than that (the BFF's default 10 s
 `fetchUpstream` timeout is far too short — web roadmap 3.1).
 
 ### `POST /v1/conversations/{id}/ask/stream` — ask a question, streamed
