@@ -199,32 +199,58 @@ export async function callApi(
   try {
     // `redirect: 'error'`: the api never redirects; following one would send the trace header on.
     const res = await fetchUpstream(`${apiBase()}${path}`, traceId, { ...init, redirect: 'error' });
-    const read = res.body
-      ? await readCapped(res.body, MAX_UPSTREAM_BYTES, BODY_READ_TIMEOUT_MS * 6)
-      : ({ kind: 'ok', text: '' } as BodyRead);
-    if (read.kind !== 'ok') {
-      log('error', 'bff upstream body unusable', { route, status: res.status, why: read.kind });
-      return upstreamError(traceId);
-    }
-    let data: unknown;
-    try {
-      data = JSON.parse(read.text);
-    } catch {
-      log('error', 'bff upstream returned a non-JSON body', { route, status: res.status });
-      return upstreamError(traceId);
-    }
-    if (res.status >= 400 && !isApiErrorBody(data)) {
+    return await relayJson(res, traceId, route);
+  } catch {
+    return upstreamUnreachable(route, traceId);
+  }
+}
+
+/**
+ * Hand an api JSON answer (status included) to the browser: an api `404`, `413`, `429` or `503`
+ * passes through with its own `{ error, trace_id }` body. An oversized reply, a reply that is not
+ * JSON, or an error status whose body is not that shape (a framework default must not reach the
+ * browser) becomes a `502` carrying our trace id. Logs the route PATTERN and the status — never
+ * the URL, because it can contain a conversation id.
+ */
+export async function relayJson(res: Response, traceId: string, route: string): Promise<Response> {
+  const read = res.body
+    ? await readCapped(res.body, MAX_UPSTREAM_BYTES, BODY_READ_TIMEOUT_MS * 6)
+    : ({ kind: 'ok', text: '' } as BodyRead);
+  if (read.kind !== 'ok') {
+    log('error', 'bff upstream body unusable', { route, status: res.status, why: read.kind });
+    return upstreamError(traceId);
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(read.text);
+  } catch {
+    log('error', 'bff upstream returned a non-JSON body', { route, status: res.status });
+    return upstreamError(traceId);
+  }
+  if (res.status >= 400) {
+    if (!isApiErrorBody(data)) {
       log('error', 'bff upstream error without the api error shape', { route, status: res.status });
       return upstreamError(traceId);
     }
+    // Rebuilt, not relayed: only these two fields reach the browser, whatever else the body held.
+    const { error, trace_id } = data as { error: string; trace_id: string };
     log('info', 'bff upstream ok', { route, status: res.status });
-    return Response.json(data, { status: res.status });
-  } catch {
-    // The error text can carry the URL (and so an id): log the route only.
-    log('error', 'bff upstream failed', { route });
-    return Response.json(
-      { error: 'upstream_unreachable', target: 'api', trace_id: traceId },
-      { status: 502 },
-    );
+    return Response.json({ error, trace_id }, { status: res.status });
   }
+  log('info', 'bff upstream ok', { route, status: res.status });
+  return Response.json(data, { status: res.status });
+}
+
+/** The `502` for an api that could not be reached. The error text can carry the URL (and so an id): never logged. */
+export function upstreamUnreachable(route: string, traceId: string): Response {
+  log('error', 'bff upstream failed', { route });
+  return Response.json(
+    { error: 'upstream_unreachable', target: 'api', trace_id: traceId },
+    { status: 502 },
+  );
+}
+
+/** The api URL for a path, for routes that open their own (streaming) connection. */
+export function apiUrl(path: string): string {
+  return `${apiBase()}${path}`;
 }

@@ -7,6 +7,40 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-07
+
+### Added
+
+- **The ask routes** (web roadmap 3.1; backward compatible — new endpoints): `POST /api/v1/conversations/[id]/ask`
+  (the whole answer, with its citations) and `POST /api/v1/conversations/[id]/ask/stream` (Server-Sent Events:
+  `sources`, `token`, `done` / `error`), body `{ "question": string }`. The api's frames reach the browser unchanged.
+  - **Checked here, with no upstream call:** `[id]` is a UUID (`400`), the body is `application/json` (`415`), at most
+    64 KiB and read within 5 s (`413` / `400`), only the key `question`, not blank, no NUL or lone surrogate (`400`),
+    at most 4,000 characters, counted as code points (`413 payload_too_large`).
+  - **Not rewritten:** the api's `404`, `413`, `422`, `429 busy` and `503 ai_unavailable` reach the browser with their
+    own `{ error, trace_id }`. An api that cannot be reached, a non-JSON reply or an error body in another shape is a
+    `502` with the trace id.
+  - **Timeout:** the BFF → api hop timeout is set explicitly to 5 minutes (`ASK_HOP_TIMEOUT_MS`), above the api's ~4
+    minute worst case, instead of `fetchUpstream`'s 10 s default. A browser that leaves aborts the api call too.
+  - An api error is relayed as `{ error, trace_id }` only, whatever else its body holds.
+  - **A stream that breaks** (the api connection fails mid-answer, or more than 1 MiB is forwarded) ends with one
+    terminal `error` frame (`error_kind` `network` / `too_long`, the request's `trace_id`) instead of a silent cut. A
+    browser that leaves cancels the api stream, which frees the api's concurrency slot.
+  - Logs carry the route pattern and a status only — never the id, the question or a token. `/v1/admin/ingest` is not
+    exposed. With `MOCK_UPSTREAM=true` both routes serve the 1.1 fixtures; `?mock=failure` (mock mode only) serves the
+    stream that fails after the answer started.
+
+### Changed
+
+- `src/lib/conversations-bff.ts` exports `relayJson`, `upstreamUnreachable` and `apiUrl` (what `callApi` did, split so
+  the streaming route can relay an api error that arrives before the stream). `callApi` behaves as before.
+
+### Known limits
+
+- Nothing sends a question from the page yet (web 3.3). The ingress request timeout in front of the web app is not set by this repo (see the roadmap item's "Needs a human"). Nothing limits how many asks a client may run at once (the api's own `429 busy` is the only brake). The browser's `Origin` is not checked; a cross-site request is
+  stopped by the `application/json` requirement (it needs a preflight), as for the other write route.
+- The template's `/api/v1/assistant/ask[/stream]` routes remain until web 4.1.
+
 ## [0.4.0] — 2026-10-07
 
 ### Added

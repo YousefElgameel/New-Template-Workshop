@@ -4,7 +4,8 @@ The complete HTTP surface of both services as they exist today: the operational 
 (`/ping`, `/info`, `/health`), the first business endpoints (`/v1/conversations`), and the two demo
 BFF routes in `apps/web` that exercise the `web → api` hop, plus the BFF mirror of the conversation
 endpoints (`/api/v1/conversations`). The web BFF also has the template's example `/api/v1/assistant/ask[/stream]`
-routes (single-turn, no api route behind them; replaced in roadmap web 4.1); the real ask routes arrive with web 3.1.
+routes (single-turn, no api route behind them; replaced in roadmap web 4.1); the real ask routes are in
+`/api/v1/conversations/[id]/ask[/stream]` (web 3.1).
 Derived from the route
 source, cross-checked against the test suites (`routes.test.ts`, `test_routes.py`).
 
@@ -16,22 +17,24 @@ removed in [ADR-0003](../adr/0003-remove-nestjs-api-layer.md).
 
 ## Route map
 
-| Method | Path                                | Service          | Purpose                                             | Versioned?       |
-| ------ | ----------------------------------- | ---------------- | --------------------------------------------------- | ---------------- |
-| GET    | `/ping`                             | `apps/api`       | Liveness greeting                                   | No (operational) |
-| GET    | `/info`                             | `apps/api`       | Status/version/runtime report                       | No (operational) |
-| GET    | `/health`                           | `apps/api`       | Health + observability state                        | No (operational) |
-| POST   | `/v1/conversations`                 | `apps/api`       | Start a conversation                                | Yes (`/v1`)      |
-| GET    | `/v1/conversations`                 | `apps/api`       | List conversations, newest first                    | Yes (`/v1`)      |
-| GET    | `/v1/conversations/{id}`            | `apps/api`       | Open a conversation with its messages               | Yes (`/v1`)      |
-| POST   | `/v1/conversations/{id}/ask`        | `apps/api`       | Ask a question; the answer cites the docs           | Yes (`/v1`)      |
-| POST   | `/v1/conversations/{id}/ask/stream` | `apps/api`       | Ask a question; the answer streams in (SSE)         | Yes (`/v1`)      |
-| GET    | `/api/v1/conversations`             | `apps/web` (BFF) | Proxies `GET /v1/conversations`                     | Yes (`/api/v1`)  |
-| POST   | `/api/v1/conversations`             | `apps/web` (BFF) | Proxies `POST /v1/conversations` (body ≤ 4 KB)      | Yes (`/api/v1`)  |
-| GET    | `/api/v1/conversations/[id]`        | `apps/web` (BFF) | Proxies `GET /v1/conversations/{id}`                | Yes (`/api/v1`)  |
-| GET    | `/api/ping-backend`                 | `apps/web` (BFF) | Proxies `apps/api` `/ping`                          | No (demo route)  |
-| GET    | `/api/info-backend`                 | `apps/web` (BFF) | Proxies `apps/api` `/info`                          | No (demo route)  |
-| GET    | `/health`                           | `apps/web` (BFF) | Own health + observability state (no upstream call) | No (operational) |
+| Method | Path                                    | Service          | Purpose                                             | Versioned?       |
+| ------ | --------------------------------------- | ---------------- | --------------------------------------------------- | ---------------- |
+| GET    | `/ping`                                 | `apps/api`       | Liveness greeting                                   | No (operational) |
+| GET    | `/info`                                 | `apps/api`       | Status/version/runtime report                       | No (operational) |
+| GET    | `/health`                               | `apps/api`       | Health + observability state                        | No (operational) |
+| POST   | `/v1/conversations`                     | `apps/api`       | Start a conversation                                | Yes (`/v1`)      |
+| GET    | `/v1/conversations`                     | `apps/api`       | List conversations, newest first                    | Yes (`/v1`)      |
+| GET    | `/v1/conversations/{id}`                | `apps/api`       | Open a conversation with its messages               | Yes (`/v1`)      |
+| POST   | `/v1/conversations/{id}/ask`            | `apps/api`       | Ask a question; the answer cites the docs           | Yes (`/v1`)      |
+| POST   | `/v1/conversations/{id}/ask/stream`     | `apps/api`       | Ask a question; the answer streams in (SSE)         | Yes (`/v1`)      |
+| GET    | `/api/v1/conversations`                 | `apps/web` (BFF) | Proxies `GET /v1/conversations`                     | Yes (`/api/v1`)  |
+| POST   | `/api/v1/conversations`                 | `apps/web` (BFF) | Proxies `POST /v1/conversations` (body ≤ 4 KB)      | Yes (`/api/v1`)  |
+| GET    | `/api/v1/conversations/[id]`            | `apps/web` (BFF) | Proxies `GET /v1/conversations/{id}`                | Yes (`/api/v1`)  |
+| POST   | `/api/v1/conversations/[id]/ask`        | `apps/web` (BFF) | Proxies `POST /v1/conversations/{id}/ask`           | Yes (`/api/v1`)  |
+| POST   | `/api/v1/conversations/[id]/ask/stream` | `apps/web` (BFF) | Proxies `…/ask/stream` (SSE, unchanged)             | Yes (`/api/v1`)  |
+| GET    | `/api/ping-backend`                     | `apps/web` (BFF) | Proxies `apps/api` `/ping`                          | No (demo route)  |
+| GET    | `/api/info-backend`                     | `apps/web` (BFF) | Proxies `apps/api` `/info`                          | No (demo route)  |
+| GET    | `/health`                               | `apps/web` (BFF) | Own health + observability state (no upstream call) | No (operational) |
 
 Business endpoints are `/v1/<feature>` on the api (routers attached to `v1_router`) and
 `/api/v1/<feature>` on web (folder-enforced). See [Versioning](#versioning).
@@ -390,6 +393,38 @@ is logged (routes log their pattern and the status only — a rejected request l
 - With `MOCK_UPSTREAM=true` the routes serve `src/mocks/conversations.ts` (marked `x-mock-upstream: true`), behind
   the same validation; `limit` is honoured, an unknown id is a marked `404`. Mock mode is refused when `APP_ENV` is
   `prod` (case and surrounding whitespace ignored).
+
+### The ask routes (`/api/v1/conversations/[id]/ask` and `…/ask/stream`)
+
+Source: `apps/web/src/app/api/v1/conversations/[id]/ask/route.ts` and `ask/stream/route.ts`, helpers in
+`src/lib/ask-bff.ts` (web roadmap 3.1). Body `{ "question": string }`. The BFF answers itself, with no upstream call,
+in this order:
+
+| When                                                                                         | Status                          |
+| -------------------------------------------------------------------------------------------- | ------------------------------- |
+| `[id]` is not a UUID (it goes into the upstream URL)                                         | `400 invalid_request`           |
+| the body is not declared `application/json` (a cross-site "simple" request has no preflight) | `415 unsupported_media_type`    |
+| the body is over 64 KiB (counted while reading), or cannot be read within 5 s                | `413 payload_too_large` / `400` |
+| not JSON, not an object, a key other than `question`, blank, NUL, a lone surrogate           | `400 invalid_request`           |
+| the question is over 4,000 characters (code points, like the api)                            | `413 payload_too_large`         |
+
+- The api's `404 not_found`, `413`, `422`, `429 busy` and `503 ai_unavailable` are **not rewritten**: status and
+  `{ error, trace_id }` reach the browser (no other field of the body does). For the stream route that holds for errors the api reports **before the first byte**
+  (JSON); from the first byte on, the status is `200` and a failure is an `error` frame.
+- An api that cannot be reached, a reply that is not JSON, or an error body without the api's shape is
+  `502 { error: "upstream_unreachable" | "upstream_error", target: "api", trace_id }`. A `200` that is not
+  `text/event-stream` is a `502` too.
+- **Timeout.** The BFF → api hop timeout is 5 minutes (`ASK_HOP_TIMEOUT_MS`): above the api's worst case of about 4
+  minutes, so the 10 s `fetchUpstream` default does not cut an answer short. It also ends when the browser leaves, which
+  frees the api's concurrency slot. The ingress in front of the web app has its own request timeout; this repo does not
+  set it.
+- **A stream that breaks.** The frames are forwarded unchanged. If the api connection fails mid-answer, or more than
+  1 MiB would be forwarded, the BFF ends the stream with one frame
+  `event: error` / `{ "error_kind": "network" | "too_long", "error": "upstream_error", "trace_id" }`. A browser that
+  leaves cancels the api stream, which frees the api's `AI_MAX_CONCURRENT_ASKS` slot.
+- Logs carry the route pattern and a status; never the id, the question, a token or the URL. `/v1/admin/ingest` is not
+  exposed. With `MOCK_UPSTREAM=true` both routes serve `src/mocks/conversations.ts`; `?mock=failure` (mock mode only)
+  serves the stream that fails after the answer started.
 
 ## Error behavior (BFF)
 

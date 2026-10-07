@@ -25,6 +25,14 @@ URL.
   `withBff`, call upstream with `fetchUpstream`; on upstream failure return `502` with a
   `trace_id` (and `target: 'api'`) so the UI degrades gracefully.
 - `src/app/health/route.ts` — `/health`.
+- `src/app/api/v1/conversations/[id]/ask/route.ts` and `ask/stream/route.ts` (`POST`) — the BFF mirror of the api's
+  ask routes; the stream is forwarded **unchanged** (`streamUpstream` + `proxyStream`). `src/lib/ask-bff.ts` holds what
+  they share: `readAskRequest` (UUID → `400`; `application/json` → `415`; ≤ 64 KiB read within 5 s → `413`/`400`; only
+  `question`, trimmed, not blank, no NUL/lone surrogate → `400`; ≤ 4,000 code points → `413`), `ASK_HOP_TIMEOUT_MS`
+  (5 min — above the api's ~4 min worst case; never the 10 s default) and `guardStream` (an api connection that breaks,
+  or > 1 MiB, ends the stream with one terminal `error` frame carrying the trace id; the browser leaving cancels the
+  api stream). The api's `404`/`413`/`422`/`429`/`503` pass through via `relayJson`; mock mode serves the 1.1
+  fixtures (`?mock=failure` for the failing stream). Logs: route pattern + status, never the id or the question.
 - `src/app/api/v1/conversations/route.ts` (`GET` list, `POST` create) + `[id]/route.ts` (`GET` open) — the BFF
   mirror of `/v1/conversations`. `src/lib/conversations-bff.ts` holds what they share: the UUID check for `[id]`
   (it goes into the upstream URL), `limit` 1–100, the create-body validation (only `title`, ≤ 200 UTF-16 units,

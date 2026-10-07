@@ -33,6 +33,7 @@ See [`apps/web/CLAUDE.md`](../../apps/web/CLAUDE.md).
   never `fetchUpstream` (JSON accept header, 10 s timeout, buffered read). The browser reads it
   with `askStream` (`src/lib/chat-client.ts`, which validates every frame — the stream is untrusted); frames are parsed
   by `src/lib/sse.ts` (CR/LF/CRLF only, bounded event size).
+  The ask routes (`src/lib/ask-bff.ts`) set their hop timeout explicitly (5 min) and wrap the body in `guardStream`.
 - On upstream failure, return a `502` JSON body including `trace_id` so the UI degrades gracefully
   (a streaming route returns a terminal `error` SSE frame with a bounded `error_kind`).
 - **Mocks (working ahead of the api):** inside the handler, `if (isMockUpstream()) return

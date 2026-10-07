@@ -159,7 +159,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 3.1 — BFF ask routes (JSON and streaming)
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [1.1, api:4.3]
 - **layers:** [bff]
 - **acceptance:**
@@ -170,11 +170,30 @@ conversation surface (decision 18) — the removal is item 4.1._
   - `/v1/admin/ingest` is **not** exposed (api:3.3)
   - with `MOCK_UPSTREAM=true` both routes serve the 1.1 fixtures, including the failure stream; works against the fixtures until api:4.3 lands
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm -C apps/web test` — expect **24 files, 483 tests** passed (new: `src/app/api/v1/conversations/ask-routes.test.ts`, 86 tests); `pnpm -C apps/web typecheck` clean; `pnpm -C apps/web build` lists `ƒ /api/v1/conversations/[id]/ask` and `…/ask/stream`.
+  - **against the mocks** (no api needed): put `MOCK_UPSTREAM=true` in `apps/web/.env.local`, run `pnpm -C apps/web dev`, then in PowerShell (the id is a fixture conversation):
+    ```
+    $id = "5b1f3a52-8c1e-4d3a-9d0b-1a2b3c4d5e01"
+    Invoke-RestMethod -Method Post "http://localhost:3000/api/v1/conversations/$id/ask" -ContentType application/json -Body '{"question":"Which port?"}'   # answer + 2 citations
+    curl.exe -N -X POST "http://localhost:3000/api/v1/conversations/$id/ask/stream" -H "content-type: application/json" -d '{\"question\":\"Which port?\"}'   # sources, tokens, done
+    curl.exe -N -X POST "http://localhost:3000/api/v1/conversations/$id/ask/stream?mock=failure" -H "content-type: application/json" -d '{\"question\":\"x\"}'   # ends with an error frame carrying trace_id
+    ```
+  - the rejections, each with no upstream call: id `not-a-uuid` → 400; `{"question":"  "}` → 400; a 4,001-character question → 413; `-ContentType text/plain` → 415
+  - **against the real api** (optional, spends model tokens, needs the Azure settings): remove `MOCK_UPSTREAM`, start the api, create a conversation through `POST /api/v1/conversations`, and repeat the two ask calls with its id; a second window asking while four are running should get `429 busy` with its `trace_id`
+  - prove the tests bite: `src/lib/ask-bff.ts` — drop the UUID check, the content-type check, the code-point count, the 1 MiB cap, the error-frame separator or the `req.signal` link, or `src/lib/conversations-bff.ts` — relay the whole api error body: the matching tests fail (24 such changes tried, all caught; one — leaving the stream route's explicit signal out — is equivalent, because `streamUpstream` defaults to the same 300 s, and the signal test covers it through `fetch`)
 - **needs_human:**
-  - none
+  - optional: the live checks above (they spend model tokens)
+  - decide how long the **ingress in front of the web app** may hold a request. I believe the Container Apps default is 240 s, about the api's worst case, and nothing in this repo sets it, so a very slow non-streaming ask could be cut there before the BFF's 5 minute timer — I could not verify it from here
+  - decide whether the ask routes need a **BFF-side limit** on concurrent asks. Today an unauthenticated client can hold the api's 4 slots (`429 busy` for everyone else) for up to 4 minutes each; acceptable while the app is internal only (ADR-0014), a gap once it is reachable more widely or before auth lands
+  - reply **done** to close the item, or tell me what to change
 - **notes:**
   - 2026-10-06 — planned. Replaces the template's `/api/v1/assistant/ask[/stream]` (removed in 4.1).
+  - 2026-10-07 — started by Claude.
+  - 2026-10-07 — implemented by Claude, awaiting test by Yousef Wahid. Files: `src/app/api/v1/conversations/[id]/ask/route.ts` and `ask/stream/route.ts`, `src/lib/ask-bff.ts` (new), `src/lib/conversations-bff.ts` (`relayJson`, `upstreamUnreachable`, `apiUrl` split out of `callApi`), `ask-routes.test.ts`, `apps/web/CLAUDE.md`, `docs/reference/http-api.md`, `.claude/rules/30-nextjs.md`, `CHANGELOG.md` + `package.json` (0.5.0). Reviews: `code-reviewer` and `security-reviewer`; no CRITICAL/HIGH.
+  - 2026-10-07 — fixed after review: an error frame could be glued onto a half-written frame (the browser would have skipped both); a browser that left a JSON ask left the api generating and holding its slot for up to 5 minutes (the api call now aborts with the browser); an api error body is rebuilt as `{ error, trace_id }` instead of relayed whole; the "explicit timeout" and "x-trace-id on a relayed error" tests were too weak; the docs claimed the timeout covered "a proxy" (only the BFF → api hop is set here).
+  - 2026-10-07 — DECISIONS: a question over 4,000 characters is `413` (as the api does; an empty or malformed one is `400`); the request body cap is 64 KiB; the stream is cut at 1 MiB; `?mock=failure` picks the failing stream in mock mode only; `/v1/admin/ingest` has no BFF route. Not done, recorded above: a concurrent-ask limit and the ingress timeout.
+  - 2026-10-07 — version 0.5.0 (MINOR: new BFF routes, backward compatible).
+  - 2026-10-07 — confirmed by Yousef Wahid.
 
 ### 3.2 — Streaming client and Sources block
 
