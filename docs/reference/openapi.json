@@ -583,6 +583,97 @@
         "summary": "Ask a question; the answer cites the docs",
         "tags": ["conversations"]
       }
+    },
+    "/v1/conversations/{conversation_id}/ask/stream": {
+      "post": {
+        "operationId": "ask_stream_v1_conversations__conversation_id__ask_stream_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Server-sent events. `sources` (`{sources: [{title, path}], count}`: every retrieved document, sent as soon as retrieval ends), then `token` (`{text}`) repeated, then `done` (`{message_id, input_tokens, output_tokens, citations}`: `citations` are the cited documents, exactly as stored) **or** `error` (`{error_kind, error, trace_id}`: the stream ends and no answer is stored). A bad request, an unknown conversation and a busy server are ordinary JSON errors before the stream starts."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "No such conversation (`not_found`)"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "The question is too long (`payload_too_large`)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_error`)"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too many asks at once (`busy`)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unhandled error (`internal_error`)"
+          }
+        },
+        "summary": "Ask a question; the answer streams in",
+        "tags": ["conversations"]
+      }
     }
   }
 }

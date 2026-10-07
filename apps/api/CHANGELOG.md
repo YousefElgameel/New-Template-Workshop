@@ -7,6 +7,63 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-07
+
+### Added
+
+- **`POST /v1/conversations/{id}/ask/stream`** (`app/routers/ask.py`; roadmap api 4.3): the same ask as `/ask`, with
+  the answer sent as server-sent events — `sources` (every retrieved document, `[{title, path}]` and a passage
+  `count`), `token` frames, then `done` (`{message_id, input_tokens, output_tokens, citations}`, `citations` being the
+  cited documents exactly as stored) or `error` (`{error_kind, error, trace_id}`, with the same trace id as the
+  `x-trace-id` header). Frames and rules are in `docs/reference/http-api.md`.
+  - A bad request (`422`), `413`, an unknown conversation (`404`) or a busy server (`429 busy`) are ordinary JSON
+    errors before the first byte, as for `/ask`. The question is stored and committed before streaming starts.
+  - The assistant message is stored once the whole answer exists, before `done` is sent; an `error` frame, or a
+    client that leaves first, stores none. A failure after the first byte — the model, the search, a blank reply or
+    the database while storing the answer — is an `error` frame, never a raised exception (an exception after the
+    response started would put the driver's text on the server span).
+  - The concurrency slot is held until the stream ends (`done`, `error` or the client leaving) and released by the
+    response itself (`app.ai.streaming.SseResponse`), not by garbage collection.
+  - An answer that would reach 4,000 characters is cut at 3,999 plus `…` and the model stops being read; tokens are
+    cleaned like stored text, so what the client saw is exactly what is stored.
+  - Counts are logged once at the end (`answer citations`, `question answered`) — no content, as for `/ask`.
+  - **Time bounds:** the whole generation has one deadline (the model's timeout × (retries + 1) plus the two
+    retrieval steps — about 4 minutes at the defaults; a provider that trickles tokens ends in an `error` frame
+    with kind `timeout`), and a client that accepts no bytes for 30 seconds is dropped, freeing its slot.
+  - **Frame hygiene:** U+2028, U+2029, U+0085 and U+007F are escaped inside the JSON (they are not SSE line
+    breaks, but a parser that splits lines more widely would take them for one inside a model-written token).
+    Token counts in `done` are non-negative integers or `null`.
+  - **Failures are visible:** a failed stream is still HTTP 200, so each failure also emits a bounded
+    `ask.stream.failed` event (`error`, `error_kind`; no content). An authentication failure is shown to the
+    client as plain `error`; the event keeps the exact kind.
+- `app/ai/streaming.py`: `iter_answer()` (the graph's stream as context / token / usage events — the template's
+  `stream_answer` frames are unchanged and now built on it), `SseResponse`, and `limits.take_slot()` (a slot that a
+  response gives back; `ask_slot` is built on it).
+- OpenAPI (`docs/reference/openapi.json`) and the web's generated types include the new route.
+
+### Changed
+
+- **No span per streamed frame** (`app/observability.py`): the FastAPI instrumentation now excludes the ASGI
+  `send` and `receive` spans. A stream made one span per token frame — up to about 1,000 per answer at 100% sampling —
+  which carried no content but cost money.
+
+### Fixed
+
+- Closing the answer iterator now also closes the graph's stream underneath it, so stopping early (an answer cut at
+  the limit, a client that left) ends the model call at once instead of when the garbage collector gets to it.
+
+### Known limits
+
+- A client that leaves exactly during the final write may still leave the answer stored, with no `done` delivered.
+- Two streams on one conversation each read the history before either stores, so their messages interleave; the
+  same holds for `/ask`.
+- Not yet checked on a real deployment: that frames flush incrementally through the BFF and any ingress (they do
+  through uvicorn), and the connection pool after a commit is cancelled mid-flight (roadmap 5.1, the dev smoke).
+- The web's hand-declared `DoneFrame` does not yet have `citations`, and its token counts can be `null`; the BFF
+  stream routes and the page (web roadmap 3.1–3.3) are not built yet.
+- As for `/ask`: no request-size cap in the api (roadmap 5.5), no per-client rate limit, and a thread read is bounded
+  by 500 messages, not bytes (roadmap 5.4).
+
 ## [0.8.0] — 2026-10-07
 
 ### Added

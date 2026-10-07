@@ -206,7 +206,14 @@ def _instrument_fastapi(app: Any, log: Any) -> None:
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        FastAPIInstrumentor.instrument_app(app, server_request_hook=scrub_ids_server_hook)
+        # `exclude_spans`: the ASGI layer would otherwise start one internal span per `send` and per
+        # `receive` — a streamed answer is one `send` per token frame, i.e. up to ~1,000 spans for
+        # one request at 100% sampling. They carry no content, only cost.
+        FastAPIInstrumentor.instrument_app(
+            app,
+            server_request_hook=scrub_ids_server_hook,
+            exclude_spans=["send", "receive"],
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("fastapi instrumentation failed", error=str(exc))
 

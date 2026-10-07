@@ -16,21 +16,22 @@ removed in [ADR-0003](../adr/0003-remove-nestjs-api-layer.md).
 
 ## Route map
 
-| Method | Path                         | Service          | Purpose                                             | Versioned?       |
-| ------ | ---------------------------- | ---------------- | --------------------------------------------------- | ---------------- |
-| GET    | `/ping`                      | `apps/api`       | Liveness greeting                                   | No (operational) |
-| GET    | `/info`                      | `apps/api`       | Status/version/runtime report                       | No (operational) |
-| GET    | `/health`                    | `apps/api`       | Health + observability state                        | No (operational) |
-| POST   | `/v1/conversations`          | `apps/api`       | Start a conversation                                | Yes (`/v1`)      |
-| GET    | `/v1/conversations`          | `apps/api`       | List conversations, newest first                    | Yes (`/v1`)      |
-| GET    | `/v1/conversations/{id}`     | `apps/api`       | Open a conversation with its messages               | Yes (`/v1`)      |
-| POST   | `/v1/conversations/{id}/ask` | `apps/api`       | Ask a question; the answer cites the docs           | Yes (`/v1`)      |
-| GET    | `/api/v1/conversations`      | `apps/web` (BFF) | Proxies `GET /v1/conversations`                     | Yes (`/api/v1`)  |
-| POST   | `/api/v1/conversations`      | `apps/web` (BFF) | Proxies `POST /v1/conversations` (body ≤ 4 KB)      | Yes (`/api/v1`)  |
-| GET    | `/api/v1/conversations/[id]` | `apps/web` (BFF) | Proxies `GET /v1/conversations/{id}`                | Yes (`/api/v1`)  |
-| GET    | `/api/ping-backend`          | `apps/web` (BFF) | Proxies `apps/api` `/ping`                          | No (demo route)  |
-| GET    | `/api/info-backend`          | `apps/web` (BFF) | Proxies `apps/api` `/info`                          | No (demo route)  |
-| GET    | `/health`                    | `apps/web` (BFF) | Own health + observability state (no upstream call) | No (operational) |
+| Method | Path                                | Service          | Purpose                                             | Versioned?       |
+| ------ | ----------------------------------- | ---------------- | --------------------------------------------------- | ---------------- |
+| GET    | `/ping`                             | `apps/api`       | Liveness greeting                                   | No (operational) |
+| GET    | `/info`                             | `apps/api`       | Status/version/runtime report                       | No (operational) |
+| GET    | `/health`                           | `apps/api`       | Health + observability state                        | No (operational) |
+| POST   | `/v1/conversations`                 | `apps/api`       | Start a conversation                                | Yes (`/v1`)      |
+| GET    | `/v1/conversations`                 | `apps/api`       | List conversations, newest first                    | Yes (`/v1`)      |
+| GET    | `/v1/conversations/{id}`            | `apps/api`       | Open a conversation with its messages               | Yes (`/v1`)      |
+| POST   | `/v1/conversations/{id}/ask`        | `apps/api`       | Ask a question; the answer cites the docs           | Yes (`/v1`)      |
+| POST   | `/v1/conversations/{id}/ask/stream` | `apps/api`       | Ask a question; the answer streams in (SSE)         | Yes (`/v1`)      |
+| GET    | `/api/v1/conversations`             | `apps/web` (BFF) | Proxies `GET /v1/conversations`                     | Yes (`/api/v1`)  |
+| POST   | `/api/v1/conversations`             | `apps/web` (BFF) | Proxies `POST /v1/conversations` (body ≤ 4 KB)      | Yes (`/api/v1`)  |
+| GET    | `/api/v1/conversations/[id]`        | `apps/web` (BFF) | Proxies `GET /v1/conversations/{id}`                | Yes (`/api/v1`)  |
+| GET    | `/api/ping-backend`                 | `apps/web` (BFF) | Proxies `apps/api` `/ping`                          | No (demo route)  |
+| GET    | `/api/info-backend`                 | `apps/web` (BFF) | Proxies `apps/api` `/info`                          | No (demo route)  |
+| GET    | `/health`                           | `apps/web` (BFF) | Own health + observability state (no upstream call) | No (operational) |
 
 Business endpoints are `/v1/<feature>` on the api (routers attached to `v1_router`) and
 `/api/v1/<feature>` on web (folder-enforced). See [Versioning](#versioning).
@@ -233,6 +234,63 @@ retries (`AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_RETRIES`), the query embedding an
 (`AI_RETRIEVAL_TIMEOUT_SECONDS`), the answer is at most `AI_MAX_OUTPUT_TOKENS` (1,024) tokens. The worst case is
 therefore about **4 minutes**; whatever calls this route must wait longer than that (the BFF's default 10 s
 `fetchUpstream` timeout is far too short — web roadmap 3.1).
+
+### `POST /v1/conversations/{id}/ask/stream` — ask a question, streamed
+
+Source: `apps/api/app/routers/ask.py` (roadmap api 4.3). The same request, history, storage rules and
+limits as `POST …/ask` above; the answer arrives as server-sent events (`text/event-stream`,
+`Cache-Control: no-cache`, `X-Accel-Buffering: no`). Request body: `{ "question": "…" }`.
+
+Each frame is one `event:` line, one JSON `data:` line and a blank line.
+
+| Event     | `data`                                                                  | When                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sources` | `{ "sources": [{ "title", "path" }], "count": 3 }`                      | Once, as soon as retrieval ends and before any token. `sources` lists **every retrieved document once** (not only the cited ones); `count` is the number of passages retrieved.                                                                                                                                                                                                                                                     |
+| `token`   | `{ "text": "partial " }`                                                | Zero or more times. Concatenated, the texts are the answer **exactly as it is stored** (control characters cleaned).                                                                                                                                                                                                                                                                                                                |
+| `done`    | `{ "message_id", "input_tokens", "output_tokens", "citations": [...] }` | The last frame on success. `citations` are the documents the answer cites, as stored (`[]` when none). The token counts are `null` when the model did not report them, or when the answer was cut (the model stops being read).                                                                                                                                                                                                     |
+| `error`   | `{ "error_kind", "error", "trace_id" }`                                 | The last frame on failure: no `done` follows and no answer is stored. `error` is `ai_unavailable` (model, search, timeout, unconfigured, blank reply) or `internal_error` (the answer could not be stored); `error_kind` is a bounded word (`timeout`, `rate_limited`, `network`, `error`, `empty_answer`, `persist_failed`; an authentication failure is reported as `error`). `trace_id` equals the `x-trace-id` response header. |
+
+```
+event: sources
+data: {"sources": [{"title": "HTTP API reference", "path": "docs/reference/http-api.md"}], "count": 1}
+
+event: token
+data: {"text": "The api listens "}
+
+event: token
+data: {"text": "on port 8000 [1]."}
+
+event: done
+data: {"message_id": "9c1e…", "input_tokens": 812, "output_tokens": 14, "citations": [{"title": "HTTP API reference", "path": "docs/reference/http-api.md"}]}
+```
+
+- **Before the first byte** the route answers with ordinary JSON errors, exactly as `POST …/ask`: `422` (blank or
+  invalid question), `413`, `404`, `429 busy`. Nothing is stored for those. From the first byte on the status is
+  already `200` and a failure is an `error` frame.
+- **What is stored, and when** — the question is stored and committed before the stream starts, so it survives any
+  failure. The assistant message is stored once the whole answer exists and **before** `done` is sent (its id is
+  `done.message_id`); an `error` frame, or a client that leaves before then, stores no answer. If the client leaves
+  exactly during that final write, the answer may still be stored.
+- **The concurrency slot** (`AI_MAX_CONCURRENT_ASKS`) is held until the stream ends: `done`, `error` or the client
+  leaving.
+- **Time bounds** — the whole generation has one deadline: the model's timeout × (retries + 1) plus the two
+  retrieval steps, about 4 minutes at the defaults. A provider that keeps trickling tokens past it ends in an
+  `error` frame with kind `timeout`. A client that accepts no bytes for 30 seconds is dropped: the connection
+  ends and the slot is freed.
+- **Framing** — each frame is two physical lines. The JSON escapes every control character, and also U+2028,
+  U+2029, U+0085 and U+007F, which a parser that splits lines on more than CR, LF and CRLF would otherwise take
+  for line breaks inside a model-written token. A client should still split lines only on CR, LF and CRLF.
+- **`sources` is wider than `citations`** — every retrieved document's title and path is sent early, cited or
+  not (accepted while the deployment is internal only, ADR-0014). Both lists are untrusted text.
+- **The cap** — an answer that would reach 4,000 characters is cut at 3,999 plus `…`, and the model is no longer
+  read, so what the client saw is exactly what is stored. (The JSON route cuts only above 4,000.)
+- **For the BFF and the page** — forward the stream unchanged (`streamUpstream` / `proxyStream`, not
+  `fetchUpstream`); the hop timeout must exceed the worst case of about 4 minutes. Show `sources` as soon as it
+  arrives, and replace it with `done.citations` when `done` arrives. Titles and paths are untrusted text: show them
+  as plain text.
+- No question, answer, passage, title or id is written to a log, a span or a metric. A database error while storing
+  the answer is caught and reported as `internal_error` / `persist_failed`; it is never raised after the response
+  has started, because the server span would record its text.
 
 ---
 

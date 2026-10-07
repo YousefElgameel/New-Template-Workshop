@@ -383,26 +383,34 @@ need a human with access._
 
 ### 4.3 — Streaming ask
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [4.2]
 - **layers:** [endpoint, ai]
 - **acceptance:**
   - `POST /v1/conversations/{id}/ask/stream` returns `text/event-stream` with frames `sources` (`[{ title, path }]`), then `token`\* (`{ text }`), then `done` (`{ message_id, input_tokens, output_tokens, citations }`, where `citations` is the cited subset exactly as in 4.2 and as stored) or `error` (`{ error_kind, error, trace_id }`) — extending the template's frames (B3)
-  - the user message is stored before streaming starts; the assistant message is stored only after `done`; an `error` frame or a client disconnect before `done` stores no assistant message
+  - the user message is stored before streaming starts; the assistant message is stored once the whole answer exists, **before** `done` is sent (`done` carries its `message_id`); an `error` frame or a client disconnect before then stores no assistant message
   - validation and not-found cases behave as in 4.2 (answered as normal JSON errors before the stream starts)
   - `x-trace-id` is on the response headers, and the `error` frame carries the same trace id; no content in telemetry
   - the frame shapes are documented in `http-api.md`
   - the `sources` frame still lists every retrieved passage, as the template's stream does; a client shows it early and replaces it with `citations` when `done` arrives
   - a stream holds one of the `AI_MAX_CONCURRENT_ASKS` slots until it ends (`done`, `error` or disconnect); an extra stream before the first byte is answered `429 busy` as normal JSON
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `cd apps/api && uv run pytest` → 722 passed (the new files: `tests/test_ask_stream_api.py`, `tests/test_ask_stream_hardening.py`); `uv run ruff check app tests alembic` clean (on Windows, `uv` may need to be on `PATH`)
+  - `uv run pytest tests/test_ask_stream_api.py -v` and `tests/test_ask_stream_hardening.py -v` → the names read as the acceptance: frame order and shapes, the user message committed before the model, nothing stored on error or disconnect, the 422/413/404/429 JSON errors before the first byte, error frames (model, search, mid-stream, blank, database), the cap, the slot held and released, no content in logs or spans
+  - `docs/reference/http-api.md` → section `POST /v1/conversations/{id}/ask/stream` (frames, error kinds, time bounds, framing); `docs/reference/openapi.json` lists the route with a `text/event-stream` 200 and 404/413/422/429/500
+  - live check (human, see needs_human): `curl -N -X POST localhost:8000/v1/conversations/<id>/ask/stream -H "content-type: application/json" -d '{"question":"Which port does the api listen on?"}'` → `sources` first, then `token` frames appearing one by one, then `done` (use `-N` so curl does not buffer)
 - **needs_human:**
-  - none beyond 4.2's live-check prerequisites
+  - the live check needs the same prerequisites as 4.2 (migration applied, index ingested, `AZURE_*` set); please watch that tokens arrive incrementally, not all at once
+  - nothing else: the BFF stream routes and the page are web 3.1–3.3
 - **notes:**
   - 2026-10-06 — planned. The web roadmap's chat item depends on this one (`api:4.3`) and on the frame shapes above.
   - 2026-10-06 — from the 1.4 security review: if a database error escapes after the stream has started (for example persisting the assistant message at the end), `UnhandledErrorMiddleware` re-raises it and the FastAPI instrumentation records `str(exc)` and the traceback on the server span — including SQL Server's own message, which can quote the text. The stream must therefore catch database errors itself and end with the bounded `error` frame, never re-raise after `http.response.start`; add a test that fails a DB write mid-stream and checks the exported server span carries no driver text.
   - 2026-10-06 — decisions taken with 4.2 (see its notes): `done` carries the cited `citations`, and streams count against the concurrency cap. **Web impact (not edited here):** web 3.1/3.2/3.3 and the hand-declared `DoneFrame` type must add `citations`, show the early `sources` list and swap it for `done.citations` — to add when planning or implementing those items.
   - 2026-10-06 — after api 4.4: at `done`, accumulate the streamed text and call `cited_chunks` / `invalid_citation_numbers` once (same helpers as `ask()`), put the cited `citations` in the `done` frame, and log the three counts once. The streaming module does not do this yet.
+  - 2026-10-07 — started by Claude.
+  - 2026-10-07 — implemented by Claude. Files: `app/routers/ask.py` (stream route and frames), `app/ai/streaming.py` (`iter_answer`, `SseResponse` with a write timeout, frame escaping), `app/ai/limits.py` (`take_slot`), `app/observability.py` (no per-frame spans), tests `tests/test_ask_stream_api.py` + `tests/test_ask_stream_hardening.py` (new) and additions, docs (`http-api.md`, `ai.md`, `60-observability.md`, `70-ai.md`, api `CLAUDE.md`), CHANGELOG, api 0.9.0, regenerated `openapi.json` and the web's `api-types.ts`. Reviews: code-reviewer and security-reviewer, both done. Fixed from them: the slot release could be skipped if closing the generator was cancelled; the stream had no overall deadline and no write timeout (a slow provider or a non-reading client could hold a slot for ever); one span per frame (about 1,000 per answer); U+2028/2029/0085/007F left raw in frames; an authentication failure was visible to clients; token counts were not validated; failed streams were invisible (HTTP 200) so a bounded `ask.stream.failed` event was added; `sources` and `done.citations` used different document keys for source-less passages; the template `stream_answer` did not close its iterator; hang guards and a span-based test for the database failure after the first byte (the 1.4 note — now exercised with a control run that shows the instrumentation really records the text). Mutation-checked: 34 mutations, all caught.
+  - 2026-10-07 — **for the web roadmap (not edited here):** `DoneFrame` needs `citations` and its token counts are `number | null`; the `error_kind` set is `timeout`, `rate_limited`, `network`, `error`, `empty_answer`, `persist_failed`; the page shows `sources` early and replaces it with `done.citations`; titles and paths are plain text; the SSE parser should split lines only on CR, LF and CRLF; the BFF forwards the stream unchanged and its hop timeout must exceed the 4-minute worst case; and it must handle `429 busy` and the JSON errors before the first byte.
+  - 2026-10-07 — confirmed by Yousef Wahid. The live check against the real model and index has not been run yet (needs migration 1.2 applied and an ingested index).
 
 ### 4.4 — Unforgeable passage headers and citation checks
 
@@ -446,6 +454,7 @@ need a human with access._
   - run the smoke against dev and report the result
 - **notes:**
   - 2026-10-06 — planned. Delegate to `runbook-writer`.
+  - 2026-10-07 — from the api 4.3 reviews, add to the smoke: frames reach the client one by one through the BFF and any ingress (they do through uvicorn); after a client leaves in the middle of the final write, the database connection pool is still healthy (a cancelled `commit()` with `mssql+aioodbc` was not verified offline).
 
 ### 5.2 — Ingest lock that works across replicas
 

@@ -141,6 +141,9 @@ The structured stdout line is the source of truth; export is a **tee**, never a 
   (`engine=`): the instrumentor's singleton guard would silently skip the second engine. Decision
   - trade-offs: [ADR-0008](../../docs/adr/0008-azure-sql-data-layer.md) (supersedes ADR-0004's
     driver-level approach).
+- **No span per frame.** The ASGI layer starts an internal span for every `send` and `receive`; a streamed
+  answer is one `send` per token frame, so `app/observability.py` passes `exclude_spans=["send", "receive"]` to
+  the FastAPI instrumentation (tested). Those spans carried no content, only cost.
 - **No resource ids on the request span.** The FastAPI instrumentation records the concrete request target
   (`http.target`, `http.url`; `url.path`/`url.full` under the stable conventions), so `GET /v1/conversations/<uuid>`
   would export the id even though `http.route` and the metrics use the pattern. `scrub_ids_server_hook`

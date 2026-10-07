@@ -119,6 +119,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/conversations/{conversation_id}/ask/stream': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Ask a question; the answer streams in */
+    post: operations['ask_stream_v1_conversations__conversation_id__ask_stream_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -556,6 +573,77 @@ export interface operations {
       };
       /** @description The model or the search did not answer, or the AI layer is not configured (`ai_unavailable`). The question is kept; no answer is stored. */
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
+        };
+      };
+    };
+  };
+  ask_stream_v1_conversations__conversation_id__ask_stream_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        conversation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AskIn'];
+      };
+    };
+    responses: {
+      /** @description Server-sent events. `sources` (`{sources: [{title, path}], count}`: every retrieved document, sent as soon as retrieval ends), then `token` (`{text}`) repeated, then `done` (`{message_id, input_tokens, output_tokens, citations}`: `citations` are the cited documents, exactly as stored) **or** `error` (`{error_kind, error, trace_id}`: the stream ends and no answer is stored). A bad request, an unknown conversation and a busy server are ordinary JSON errors before the stream starts. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'text/event-stream': string;
+        };
+      };
+      /** @description No such conversation (`not_found`) */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
+        };
+      };
+      /** @description The question is too long (`payload_too_large`) */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
+        };
+      };
+      /** @description Validation failed (`validation_error`) */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
+        };
+      };
+      /** @description Too many asks at once (`busy`) */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
+        };
+      };
+      /** @description Unhandled error (`internal_error`) */
+      500: {
         headers: {
           [name: string]: unknown;
         };

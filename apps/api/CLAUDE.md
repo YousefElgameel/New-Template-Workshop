@@ -80,7 +80,7 @@ this as a starting map; read the actual files when you need detail.
 - `ai/` — the AI runtime (ADR-0009, rule 70): `config.py` (`AZURE_AI_*`/`AZURE_SEARCH_*`/`AI_*`),
   `client.py` (**the mock seam** — `get_chat_model()`/`get_embeddings()`, managed identity when
   deployed), `graph.py` (`build_graph()` → `retrieve → answer` LangGraph, `ask()`),
-  `streaming.py` (SSE frames + `sse_response()`), `tools/` (registry; `retrieve.py` Azure AI
+  `streaming.py` (`iter_answer`, SSE frames, `SseResponse`: write timeout + slot release), `tools/` (registry; `retrieve.py` Azure AI
   Search; `query_external_db.py` allow-listed read-only SQL via `queries.py`), `prompts/`
   (files, `load_prompt`), `citations.py` (the `[n]` markers an answer cites → retrieved passages, never model text), `history.py` (stored rows → model history, user/assistant only), `limits.py` (the concurrent-ask cap), `telemetry.py` (`model_call_span`, content-free), `ingest.py`
   (`python -m app.ai.ingest [--corpus DIR]`; owns the index definition, the `.md`-only corpus loader and the dimension guards). Ships **no route** — a project

@@ -93,6 +93,13 @@ stored (NUL and lone surrogates dropped, other control characters except tab/new
 `AI_REQUEST_TIMEOUT_SECONDS`/`AI_MAX_RETRIES`, each retrieval step by `AI_RETRIEVAL_TIMEOUT_SECONDS`. Details and the
 error table: [`docs/reference/http-api.md`](../reference/http-api.md).
 
+**The ask stream** (`POST /v1/conversations/{id}/ask/stream`, same module) is the same flow with the answer sent as it is
+written: validation, 404 and `429 busy` are ordinary JSON errors before the first byte; then the slot is held by the
+response itself (`SseResponse` releases it when the stream ends or the client leaves) and the frames are `sources`,
+`token`\*, `done` or `error`. The whole generation has one deadline and a client that stops reading is dropped after
+30 s, so a slow provider or a stalled reader cannot hold a slot for ever. The assistant message is stored before `done`; a failure after the first byte is an
+`error` frame, never an exception (a raised database error would put its text on the server span).
+
 **`streaming.py`.** `stream_answer()` drives the same graph with LangGraph's `updates` +
 `messages` stream modes and yields Server-Sent Events: `sources` (after retrieval), `token`
 (per model chunk), `done` (sources + usage) or `error` (a bounded `error_kind`, never the

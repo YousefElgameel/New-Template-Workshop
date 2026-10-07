@@ -116,6 +116,25 @@ class TestAskSlots:
         asyncio.run(scenario())
         assert limits.slots_in_use() == 0
 
+    def test_a_taken_slot_is_given_back_once_however_often_release_is_called(self) -> None:
+        release = limits.take_slot(2)
+        other = limits.take_slot(2)
+        assert limits.slots_in_use() == 2
+        release()
+        release()
+        release()
+        assert limits.slots_in_use() == 1  # not 0, and never negative
+        other()
+        assert limits.slots_in_use() == 0
+
+    def test_take_slot_refuses_at_the_limit_without_taking_one(self) -> None:
+        release = limits.take_slot(1)
+        with pytest.raises(limits.NoFreeSlot):
+            limits.take_slot(1)
+        assert limits.slots_in_use() == 1
+        release()
+        assert limits.slots_in_use() == 0
+
     def test_a_limit_of_zero_or_less_refuses_everything(self) -> None:
         with pytest.raises(limits.NoFreeSlot):
             with limits.ask_slot(0):
