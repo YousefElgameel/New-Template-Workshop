@@ -83,7 +83,7 @@ this as a starting map; read the actual files when you need detail.
   `streaming.py` (`iter_answer`, SSE frames, `SseResponse`: write timeout + slot release), `tools/` (registry; `retrieve.py` Azure AI
   Search; `query_external_db.py` allow-listed read-only SQL via `queries.py`), `prompts/`
   (files, `load_prompt`), `citations.py` (the `[n]` markers an answer cites → retrieved passages, never model text), `history.py` (stored rows → model history, user/assistant only), `limits.py` (the concurrent-ask cap), `telemetry.py` (`model_call_span`, content-free), `ingest.py`
-  (`python -m app.ai.ingest [--corpus DIR]`; owns the index definition, the `.md`-only corpus loader and the dimension guards). Ships **no route** — a project
+  (`python -m app.ai.ingest [--corpus DIR] [--no-prune|--force-prune]`; owns the index definition, the `.md`-only corpus loader — paths resolved first, nothing outside the root read, text cleaned, comments dropped —, the dimension guards, stale-chunk removal after a complete run and a timeout on every call). Ships **no route** — a project
   adds `/v1/...` routes that call it (`docs/architecture/ai.md`).
 
 ## Conventions

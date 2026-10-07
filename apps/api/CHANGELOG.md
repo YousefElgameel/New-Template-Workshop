@@ -7,6 +7,55 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-07
+
+### Changed
+
+- **Ingestion is hardened against what a corpus can contain** (`app/ai/ingest.py`; roadmap api 3.5, threat model T2,
+  T3, I7, AI-11, gap G6). `uv run python -m app.ai.ingest` now:
+  - **resolves every path first** and reads the resolved path: a file that resolves outside the corpus root (a
+    symlink, a junction) is skipped and counted, never read (`skipped_outside_root`). Also skipped and counted
+    (`skipped_unsafe`): a link whose target is not `.md`, a `source` that is not one printable line of at most 300
+    characters, a hidden file or directory (`.git`, `.env.md`), a hard link and a file over 2 MB. A path that cannot be
+    resolved at all is counted apart (`skipped_unresolved`) and stops the stale-chunk removal;
+  - **cleans every file's text before it is chunked**: control and format characters (NUL, zero-width, bidirectional
+    marks, the byte-order mark, Unicode tag characters, variation selectors and a few blank letters) are removed;
+    vertical tab, form feed, NEL and line and paragraph separators become newlines; HTML comments are dropped
+    **everywhere, code fences included** (a comment is invisible when the page is rendered and fully visible to a
+    model, and whether a line opens a fence is a rendering decision the author controls). The title is read from the
+    cleaned text, and the number of files that changed is reported (`cleaned`). Trade-offs, on purpose: the zero-width
+    joiner and non-joiner are removed too, so a joined emoji sequence splits and Persian or Indic text loses its
+    joiners (it still reads, and matches keyword searches better); a `<!--` written in inline code takes the text up
+    to the next `-->` (or the end of the file) with it — the `cleaned` count is the only sign;
+  - **removes stale chunks after a run in which every upload succeeded**: chunks of this index that the run did not
+    produce — those of a file that is no longer in the corpus and the tail of one that got shorter — selected by
+    `source` (only a chunk whose source starts with `docs/` is ever removed). A run that fails part-way, with failed
+    uploads, with an unresolved file, or whose documents are all empty after cleaning removes nothing, and so does a
+    run that would remove at least 20 chunks that are more than half of the index's own — a wrong `CORPUS_DIR` looks
+    like that: the upload stands, the run says so and exits 1, and `--force-prune` overrides it. `--no-prune` turns the
+    removal off. The index itself is still never deleted or recreated;
+  - **bounds every call**: each embedding call, upload, listing and removal has `AI_RETRIEVAL_TIMEOUT_SECONDS` (30 s)
+    and stops the run with a one-line `ingest stopped: … took longer than 30 s` (exit code 2); the index client has
+    explicit connect/read timeouts and a small retry budget like the search client.
+  - The printed report and the logs carry counts and seconds only — now also `skipped_outside_root`, `skipped_unsafe`,
+    `skipped_unresolved`, `cleaned`, `removed`, `removal_failed` and `removal_refused` — never text or a path. The exit
+    code is `1` when an upload or a removal failed or was refused.
+- `ingest.load_corpus` is now `ingest.scan_corpus(root).documents`; `scan_corpus` also returns the counts.
+
+### Known limits
+
+- The stale-chunk pass lists the index with one paged search and compares what came back with the service's own
+  count (a warning with both numbers when it is short); against a real index that has more chunks than the service
+  pages out it can remove fewer than it should, never more. It has not been run against a live index yet.
+- A timeout stops the awaiting code, not the worker thread that was making the call: the call may still finish, and
+  the process waits for it before it exits. The Search client's own timeouts and retry budget are the real bound.
+- What the cleaning does not cover: markdown reference-link comments (`[//]: # (…)`), `<script>`/`<style>`,
+  `<div hidden>`, link titles and image alt text, YAML front matter in chunks, encoded blobs, homoglyphs. The prompt
+  ("context is data") remains the real control against prompt injection.
+- Two ingests at once can undo each other's work (no lock until api 5.2); run one at a time.
+- A pointer to a file that changes between the check and the read (a race with someone who can write to the corpus) is
+  not defended against; the corpus is the repository's `docs/` or the image's copy.
+
 ## [0.9.0] — 2026-10-07
 
 ### Added

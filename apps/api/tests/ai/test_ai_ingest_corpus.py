@@ -487,8 +487,40 @@ def test_main_prints_counts_and_seconds_only(
     monkeypatch.setattr("sys.argv", ["ingest"])
     ingest.main()
     assert capsys.readouterr().out.strip() == (
-        "documents=2 chunks=5 uploaded=5 failed=0 seconds=1.25"
+        "documents=2 chunks=5 uploaded=5 failed=0 skipped_outside_root=0 skipped_unsafe=0 "
+        "skipped_unresolved=0 cleaned=0 removed=0 removal_failed=0 removal_refused=0 seconds=1.25"
     )
+
+
+def test_main_exits_1_when_a_removal_failed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def partly(argv=None):
+        return ingest.IngestReport(documents=2, chunks=5, uploaded=5, removed=3, removal_failed=1)
+
+    monkeypatch.setattr(ingest, "run", partly)
+    monkeypatch.setattr(ingest, "configure_logging", lambda *a, **k: None)
+    monkeypatch.setattr("sys.argv", ["ingest"])
+    with pytest.raises(SystemExit) as caught:
+        ingest.main()
+    assert caught.value.code == 1
+    assert "removed=3 removal_failed=1" in capsys.readouterr().out
+
+
+def test_main_turns_a_timeout_into_a_one_line_exit_2(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def hangs(argv=None):
+        raise ingest.IngestTimeout("embedding a batch", 30)
+
+    monkeypatch.setattr(ingest, "run", hangs)
+    monkeypatch.setattr(ingest, "configure_logging", lambda *a, **k: None)
+    monkeypatch.setattr("sys.argv", ["ingest"])
+    with pytest.raises(SystemExit) as caught:
+        ingest.main()
+    err = capsys.readouterr().err
+    assert caught.value.code == 2
+    assert err.startswith("ingest stopped: embedding a batch took longer than 30 s")
 
 
 def test_content_field_is_unchanged_for_the_retriever() -> None:

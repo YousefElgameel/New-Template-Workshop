@@ -131,8 +131,16 @@ an existing index whose vector size differs from the configured one (it never de
 recreates an index — its owner does); before it touches the index the job also embeds a constant
 probe and stops if the deployment's vectors have another size. `ingest_documents` chunks (fixed
 windows with overlap), embeds in batches and uploads with stable ids (re-ingesting a source
-overwrites its chunks); it logs counts and seconds, never text. Run it from `apps/api`:
-`uv run python -m app.ai.ingest [--corpus DIR]`. The identity needs _Search Index Data
+overwrites its chunks); it logs counts and seconds, never text. The corpus is untrusted input, so the
+load resolves every path first (a file that resolves outside the root is skipped and counted, never
+read), skips a `source` that is not one printable line, and cleans the text before it is chunked
+(control and format characters removed, HTML comments dropped outside code fences). After a run in
+which every upload succeeded, chunks of this index that the run did not produce are removed (selected
+by `source`; `--no-prune` turns it off), and every embedding, search and index call has the
+`AI_RETRIEVAL_TIMEOUT_SECONDS` budget. Run it from `apps/api`:
+`uv run python -m app.ai.ingest [--corpus DIR] [--no-prune|--force-prune]`. The removal refuses (and
+the run exits 1) when it would remove most of the index — a wrong `CORPUS_DIR` — unless
+`--force-prune`. The identity needs _Search Index Data
 Contributor_ + _Search Service Contributor_ (granted to the api identity by the `ai-search`
 module; a dev key works locally).
 

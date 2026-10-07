@@ -12,11 +12,27 @@ The corpus is every ``.md`` file under one directory (decision 14): ``CORPUS_DIR
 ``source`` is always ``docs/<path inside that directory>``, so citations read the same locally
 and in the container.
 
+The corpus is untrusted input (threat model T3, G3, G6), so the load is defensive: a file whose
+resolved path leaves the corpus root (a symlink, ``..``) is skipped and counted, never read; a file
+whose ``source`` would not be one printable line, a hard link, a hidden file or a very large one is
+skipped and counted; the text of every file is cleaned before it is chunked (control, format and
+other invisible characters removed, HTML comments dropped everywhere — a comment is invisible to a
+reader and fully visible to a model) and the title is read from the cleaned text.
+
+After a run in which every upload succeeded, chunks of this index that the run did not produce are
+removed — only chunks whose ``source`` starts with ``docs/``, never when a file could not be
+resolved, and not when that would be most of the index (a wrong corpus directory looks like that:
+``--force-prune`` overrides, ``--no-prune`` turns the removal off). Every embedding, search and
+index call has an explicit timeout (``AI_RETRIEVAL_TIMEOUT_SECONDS``, 30 s). Logs and the printed
+report carry counts and seconds only.
+
 Run it from ``apps/api`` (needs the AI + search settings; the api identity or a dev key with
 *Search Index Data Contributor* + *Search Service Contributor*)::
 
     uv run python -m app.ai.ingest                      # the corpus directory
     uv run python -m app.ai.ingest --corpus ../../docs --chunk-size 800 --overlap 80
+    uv run python -m app.ai.ingest --no-prune           # upload only, remove nothing
+    uv run python -m app.ai.ingest --force-prune        # also when that removes most of the index
 
 Batches are embedded with ``aembed_documents`` and uploaded with ``upload_documents``; the
 report prints counts and seconds only — never content. Very large corpora deserve a real
@@ -31,18 +47,25 @@ import hashlib
 import re
 import sys
 import time
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+import unicodedata
+from collections.abc import Awaitable, Iterable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from azure.core.exceptions import ResourceNotFoundError
 from langchain_core.embeddings import Embeddings
 
-from app.ai.config import AINotConfigured, AISettings, get_ai_settings
+from app.ai.config import (
+    DEFAULT_RETRIEVAL_TIMEOUT_SECONDS,
+    AINotConfigured,
+    AISettings,
+    get_ai_settings,
+)
 from app.ai.tools.retrieve import (
     CONTENT_FIELD,
     ID_FIELD,
+    SEARCH_RETRY_TOTAL,
     SOURCE_FIELD,
     TITLE_FIELD,
     VECTOR_FIELD,
@@ -59,6 +82,18 @@ HNSW_CONFIG = "hnsw"
 MARKDOWN_SUFFIX = ".md"
 SOURCE_PREFIX = "docs"
 MAX_TITLE_LENGTH = 200
+# A ``source`` is a path: longer than this is not a document path, it is a file name made to be one.
+MAX_SOURCE_LENGTH = 300
+# Documents removed from the index per request (the service accepts up to 1,000).
+DELETE_BATCH_SIZE = 500
+# A file over this many bytes is not documentation (and is read whole into memory): skipped.
+MAX_FILE_BYTES = 2_000_000
+# A line longer than this is not a heading (and the heading pattern is slow on long space runs).
+MAX_HEADING_LINE = 1000
+# Removing at least this many chunks, and more than this fraction of the index's own, looks like a
+# wrong corpus directory rather than an edit: the run refuses unless it is forced.
+PRUNE_BRAKE_MIN = 20
+PRUNE_BRAKE_FRACTION = 0.5
 # A constant string: the dimension check never sends document text.
 DIMENSION_PROBE = "dimension check"
 
@@ -73,6 +108,30 @@ class CorpusNotFound(IngestError):
 
 class CorpusEmpty(IngestError):
     """The corpus directory holds no ``.md`` file."""
+
+
+class IngestTimeout(IngestError):
+    """One call of the run took longer than its budget; the run stopped there."""
+
+    def __init__(self, step: str, seconds: float) -> None:
+        self.step, self.seconds = step, seconds
+        super().__init__(
+            f"{step} took longer than {seconds:g} s (AI_RETRIEVAL_TIMEOUT_SECONDS), so the run "
+            f"stopped (a call that timed out may still finish, so the index may be partly updated)"
+        )
+
+
+class PruneRefused(IngestError):
+    """The stale chunks are most of the index: the upload stands and nothing is removed."""
+
+    def __init__(self, stale: int, total: int) -> None:
+        self.stale, self.total = stale, total
+        super().__init__(
+            f"{stale} of {total} chunks would be removed, which looks like a wrong corpus "
+            f"directory (CORPUS_DIR or --corpus), not an edit. The upload completed and nothing "
+            f"was removed; "
+            f"check the directory, or run again with --force-prune"
+        )
 
 
 class IndexDimensionMismatch(IngestError):
@@ -125,11 +184,35 @@ class IngestDocument:
 
 @dataclass
 class IngestReport:
+    """What a run did, as counts and seconds — never a document's text or a list of paths."""
+
     documents: int = 0
     chunks: int = 0
     uploaded: int = 0
     failed: int = 0
     seconds: float = 0.0
+    skipped_outside_root: int = 0
+    skipped_unsafe: int = 0
+    skipped_unresolved: int = 0
+    cleaned: int = 0
+    removed: int = 0
+    removal_failed: int = 0
+    removal_refused: bool = False
+    # What the run put in the index (ids), for the stale-chunk pass; not part of the report.
+    live_ids: set[str] = field(default_factory=set, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class CorpusLoad:
+    """The documents of a corpus directory, and what the load skipped or changed (counts)."""
+
+    documents: list[IngestDocument]
+    skipped_outside_root: int = 0
+    skipped_unsafe: int = 0
+    # Files whose path could not be resolved (a loop, a vanished target, an I/O error): not known to
+    # be outside the root, so a run with any of them removes nothing from the index.
+    skipped_unresolved: int = 0
+    cleaned: int = 0
 
 
 def chunk_text(
@@ -172,6 +255,73 @@ def clean_title(raw: str) -> str:
     return " ".join(spaced.split())[:MAX_TITLE_LENGTH]
 
 
+def clean_source(raw: str) -> str:
+    """One line of printable text, bounded — the same rules as a title, for a path."""
+    spaced = "".join(ch if ch.isprintable() else " " for ch in raw)
+    return " ".join(spaced.split())[:MAX_SOURCE_LENGTH]
+
+
+# Neither control nor format characters, yet they show as nothing (or carry hidden bytes):
+# variation selectors and a few blank letters.
+_INVISIBLE = frozenset(
+    [*range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0), 0x3164, 0xFFA0, 0x115F, 0x1160, 0x2800]
+)
+# Control characters that separate words: they become newlines, not nothing.
+_SEPARATORS = "\x0b\x0c\x85\u2028\u2029"
+
+
+def is_safe_source(source: str) -> bool:
+    """A ``source`` is safe when it is one printable line (no newline, control or format character)
+    and not longer than ``MAX_SOURCE_LENGTH``; spacing in a file name is its own business."""
+    return 0 < len(source) <= MAX_SOURCE_LENGTH and source.isprintable()
+
+
+def _clean_characters(text: str) -> str:
+    """Drop control and format characters (NUL, zero-width and bidirectional marks, the byte-order
+    mark, Unicode tag characters…) and the invisible ones in ``_INVISIBLE``, but keep newlines and
+    tabs; characters that separate words (vertical tab, form feed, NEL, line and paragraph
+    separators) become newlines so words do not run together."""
+    out: list[str] = []
+    for ch in text:
+        if ch in "\n\t":
+            out.append(ch)
+        elif ch in _SEPARATORS:
+            out.append("\n")
+        elif ord(ch) in _INVISIBLE or unicodedata.category(ch) in ("Cc", "Cf"):
+            continue
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def strip_html_comments(text: str) -> str:
+    """Remove ``<!-- … -->`` everywhere — inside code fences too: a comment is invisible in a
+    rendered page and fully visible to a model, and whether a line opens a fence is a rendering
+    decision the attacker controls. An unterminated one runs to the end. Linear in the size of the
+    text."""
+    if "<!--" not in text:
+        return text
+    out: list[str] = []
+    position = 0
+    while True:
+        start = text.find("<!--", position)
+        if start == -1:
+            out.append(text[position:])
+            break
+        out.append(text[position:start])
+        end = text.find("-->", start + 4)
+        if end == -1:
+            break
+        position = end + 3
+    return "".join(out)
+
+
+def clean_text(text: str) -> str:
+    """The text of a document as it is chunked: characters first (so a zero-width character inside
+    ``<!--`` cannot hide a comment from the next step), then comments."""
+    return strip_html_comments(_clean_characters(text))
+
+
 def extract_title(text: str, fallback: str) -> str:
     """The first top-level ``# `` heading outside a code fence (and outside front matter),
     else ``fallback`` (the file name). Either way the result goes through ``clean_title``;
@@ -194,6 +344,8 @@ def extract_title(text: str, fallback: str) -> str:
                 fence = None  # a closing fence: same character, at least as long, no info string
             continue
         if fence is not None:
+            continue
+        if len(line) > MAX_HEADING_LINE:
             continue
         match = _HEADING.match(line)
         if match:
@@ -246,14 +398,21 @@ def build_index_client(settings: AISettings | None = None) -> Any:
 
     s = settings or get_ai_settings()
     s.require_search()
-    return SearchIndexClient(endpoint=s.search_endpoint, credential=build_search_credential(s))
+    # azure-core's defaults are 300 s timeouts and 10 retries: explicit, like the search client.
+    return SearchIndexClient(
+        endpoint=s.search_endpoint,
+        credential=build_search_credential(s),
+        connection_timeout=s.retrieval_timeout_seconds,
+        read_timeout=s.retrieval_timeout_seconds,
+        retry_total=SEARCH_RETRY_TOTAL,
+    )
 
 
 def vector_dimensions(index: Any) -> int | None:
     """The vector size of an index's ``content_vector`` field, if it has one."""
-    for field in index.fields:
-        if field.name == VECTOR_FIELD:
-            return field.vector_search_dimensions
+    for index_field in index.fields:
+        if index_field.name == VECTOR_FIELD:
+            return index_field.vector_search_dimensions
     return None
 
 
@@ -277,9 +436,27 @@ def ensure_index(index_client: Any, index: Any) -> Any:
     return index_client.create_or_update_index(index)
 
 
-async def check_embedding_dimensions(embeddings: Embeddings, expected: int) -> None:
+async def _bounded[T](step: str, seconds: float, awaitable: Awaitable[T]) -> T:
+    """Await with a deadline; a timeout becomes an ``IngestTimeout`` naming the step."""
+    try:
+        async with asyncio.timeout(seconds):
+            return await awaitable
+    except TimeoutError as exc:
+        raise IngestTimeout(step, seconds) from exc
+
+
+async def check_embedding_dimensions(
+    embeddings: Embeddings,
+    expected: int,
+    *,
+    timeout_seconds: float = DEFAULT_RETRIEVAL_TIMEOUT_SECONDS,
+) -> None:
     """Embed a constant probe and compare its size, before the index is touched."""
-    vector = await embeddings.aembed_query(DIMENSION_PROBE)
+    vector = await _bounded(
+        "the embedding dimension check",
+        timeout_seconds,
+        embeddings.aembed_query(DIMENSION_PROBE),
+    )
     if len(vector) != expected:
         raise EmbeddingDimensionMismatch(len(vector), expected)
 
@@ -298,30 +475,77 @@ def resolve_corpus_dir(settings: AISettings | None = None) -> Path:
     return Path(s.corpus_dir) if s.corpus_dir else default_corpus_dir()
 
 
-def load_corpus(root: Path) -> list[IngestDocument]:
-    """Every ``.md`` file under ``root`` as a document, sorted by path.
+def scan_corpus(root: Path) -> CorpusLoad:
+    """Every ``.md`` file under ``root`` as a document, sorted by path, and what was skipped.
 
     ``source`` is ``docs/<path inside root>`` (``/`` separators), whatever ``root`` is, so a
-    citation reads the same on a laptop and in the image.
+    citation reads the same on a laptop and in the image. Each candidate's path is **resolved
+    first** and the resolved path is what is read: one that resolves outside the root (a symlink,
+    a junction, ``..``) is skipped and counted without being read. Also skipped and counted: a
+    link whose target is not ``.md``, a source that is not one printable line, a hidden file or
+    directory, a hard link, and a file over ``MAX_FILE_BYTES``. A path that cannot be resolved at
+    all is counted apart (``skipped_unresolved``) because it is not known to be outside. The text
+    that is kept has been through ``clean_text``; ``cleaned`` counts the files that changed by it.
     """
     if not root.is_dir():
         raise CorpusNotFound(f"the corpus directory {root} does not exist")
+    real_root = root.resolve()
     docs: list[IngestDocument] = []
+    outside = unsafe = unresolved = cleaned = 0
     # Sorted on the posix path, not the Path: Windows compares paths case-insensitively.
     for file in sorted(
         (p for p in root.rglob("*") if p.is_file()), key=lambda p: p.relative_to(root).as_posix()
     ):
         if file.suffix.lower() != MARKDOWN_SUFFIX:
             continue
+        try:
+            resolved = file.resolve(strict=True)
+        except OSError, RuntimeError:  # a loop, a vanished target, an unreadable link
+            unresolved += 1
+            continue
+        if not resolved.is_relative_to(real_root):
+            outside += 1
+            continue
         relative = file.relative_to(root).as_posix()
+        source = f"{SOURCE_PREFIX}/{relative}"
+        if (
+            not is_safe_source(source)
+            or resolved.suffix.lower() != MARKDOWN_SUFFIX
+            or any(part.startswith(".") for part in relative.split("/"))
+        ):
+            unsafe += 1
+            continue
+        try:
+            info = resolved.stat()
+        except OSError:
+            unresolved += 1
+            continue
+        if info.st_nlink > 1 or info.st_size > MAX_FILE_BYTES:
+            unsafe += 1
+            continue
         try:
             # utf-8-sig drops a byte-order mark; invalid bytes fail the run, never become U+FFFD.
-            text = file.read_text(encoding="utf-8-sig")
+            raw = resolved.read_text(encoding="utf-8-sig")
         except UnicodeDecodeError as exc:
             raise CorpusUnreadable(f"{relative} is not valid UTF-8 text") from exc
-        source = f"{SOURCE_PREFIX}/{relative}"
+        except OSError as exc:
+            raise CorpusUnreadable(f"{relative} could not be read") from exc
+        text = clean_text(raw)
+        if text != raw:
+            cleaned += 1
         docs.append(IngestDocument(source=source, text=text, title=extract_title(text, file.name)))
-    return docs
+    return CorpusLoad(
+        documents=docs,
+        skipped_outside_root=outside,
+        skipped_unsafe=unsafe,
+        skipped_unresolved=unresolved,
+        cleaned=cleaned,
+    )
+
+
+def load_corpus(root: Path) -> list[IngestDocument]:
+    """The documents of ``scan_corpus`` (see there for what is skipped and cleaned)."""
+    return scan_corpus(root).documents
 
 
 def _batches(items: Sequence[Any], size: int) -> Iterable[Sequence[Any]]:
@@ -338,11 +562,13 @@ async def ingest_documents(
     overlap: int = DEFAULT_OVERLAP,
     batch_size: int = 64,
     expected_dimensions: int | None = None,
+    timeout_seconds: float = DEFAULT_RETRIEVAL_TIMEOUT_SECONDS,
 ) -> IngestReport:
     """Chunk, embed and upload. Returns counts and seconds only.
 
     With ``expected_dimensions`` set, a batch whose vectors have another size stops the run
-    before it is uploaded.
+    before it is uploaded. Each embedding call and each upload has ``timeout_seconds``; one that
+    exceeds it stops the run (``IngestTimeout``).
     """
     log = get_logger("app.ai.ingest")
     started = time.perf_counter()
@@ -362,14 +588,23 @@ async def ingest_documents(
                 }
             )
     report.chunks = len(records)
+    report.live_ids = {r[ID_FIELD] for r in records}
     for batch in _batches(records, batch_size):
-        vectors = await embeddings.aembed_documents([r[CONTENT_FIELD] for r in batch])
+        vectors = await _bounded(
+            "embedding a batch",
+            timeout_seconds,
+            embeddings.aembed_documents([r[CONTENT_FIELD] for r in batch]),
+        )
         if expected_dimensions is not None:
             for vector in vectors:
                 if len(vector) != expected_dimensions:
                     raise EmbeddingDimensionMismatch(len(vector), expected_dimensions)
         payload = [{**r, VECTOR_FIELD: v} for r, v in zip(batch, vectors, strict=True)]
-        results = await asyncio.to_thread(search_client.upload_documents, documents=payload)
+        results = await _bounded(
+            "uploading a batch",
+            timeout_seconds,
+            asyncio.to_thread(search_client.upload_documents, documents=payload),
+        )
         ok = sum(1 for r in results if getattr(r, "succeeded", False))
         report.uploaded += ok
         report.failed += len(payload) - ok
@@ -386,6 +621,72 @@ async def ingest_documents(
     return report
 
 
+def _list_index(search_client: Any) -> tuple[list[tuple[str, str]], int | None, int]:
+    """``(id, source)`` of every chunk in the index that has a source, the number of chunks the
+    service says it holds (``None`` if it does not say), and how many rows came back. The SDK pages
+    through the results; a chunk without a ``source`` is not one this job made, so it is not listed.
+    """
+    rows = search_client.search(
+        search_text="*", select=[ID_FIELD, SOURCE_FIELD], include_total_count=True
+    )
+    total = rows.get_count() if hasattr(rows, "get_count") else None
+    listed: list[tuple[str, str]] = []
+    seen = 0
+    for row in rows:
+        seen += 1
+        doc_id, source = row.get(ID_FIELD), row.get(SOURCE_FIELD)
+        if isinstance(doc_id, str) and isinstance(source, str) and source:
+            listed.append((doc_id, source))
+    return listed, total, seen
+
+
+async def prune_stale(
+    search_client: Any,
+    *,
+    live_ids: set[str],
+    timeout_seconds: float = DEFAULT_RETRIEVAL_TIMEOUT_SECONDS,
+    batch_size: int = DELETE_BATCH_SIZE,
+    force: bool = False,
+) -> tuple[int, int]:
+    """Remove the chunks of this index that the run did not produce — those of a file that is no
+    longer in the corpus, and the tail of one that got shorter. Selected by ``source`` — only a
+    chunk whose source starts with ``docs/`` is ever removed — and by id. Refuses (``PruneRefused``)
+    to remove at least ``PRUNE_BRAKE_MIN`` chunks that are more than ``PRUNE_BRAKE_FRACTION`` of
+    the index's own, unless ``force``. Returns ``(removed, failed)``.
+
+    Call it only after a run in which every upload succeeded: a failed run removes nothing.
+    """
+    log = get_logger("app.ai.ingest")
+    listed, total, seen = await _bounded(
+        "listing the index", timeout_seconds, asyncio.to_thread(_list_index, search_client)
+    )
+    if total is not None and seen < total:
+        # The listing stopped early (a paging limit): safe, it can only remove less, but say so.
+        log.warning("ingest index listing incomplete", listed=seen, indexed=total)
+    ours = [doc_id for doc_id, source in listed if source.startswith(f"{SOURCE_PREFIX}/")]
+    stale = [doc_id for doc_id in ours if doc_id not in live_ids]
+    if (
+        not force
+        and len(stale) >= PRUNE_BRAKE_MIN
+        and len(stale) > len(ours) * PRUNE_BRAKE_FRACTION
+    ):
+        raise PruneRefused(len(stale), len(ours))
+    removed = failed = 0
+    for batch in _batches(stale, batch_size):
+        results = await _bounded(
+            "removing stale chunks",
+            timeout_seconds,
+            asyncio.to_thread(
+                search_client.delete_documents, documents=[{ID_FIELD: doc_id} for doc_id in batch]
+            ),
+        )
+        ok = sum(1 for r in results if getattr(r, "succeeded", False))
+        removed += ok
+        failed += len(batch) - ok
+    log.info("ingest stale chunks removed", listed=len(listed), removed=removed, failed=failed)
+    return removed, failed
+
+
 async def run(argv: Sequence[str] | None = None) -> IngestReport:
     parser = argparse.ArgumentParser(prog="python -m app.ai.ingest", description=__doc__)
     parser.add_argument(
@@ -397,31 +698,90 @@ async def run(argv: Sequence[str] | None = None) -> IngestReport:
     parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
     parser.add_argument("--overlap", type=int, default=DEFAULT_OVERLAP)
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument(
+        "--force-prune",
+        action="store_true",
+        help="remove stale chunks even when that would remove most of the index",
+    )
+    parser.add_argument(
+        "--no-prune",
+        action="store_true",
+        help="upload only: do not remove chunks of files that are no longer in the corpus",
+    )
     args = parser.parse_args(argv)
 
     from app.ai.client import get_embeddings
 
+    started = time.perf_counter()
+    log = get_logger("app.ai.ingest")
     settings = get_ai_settings()
     settings.require_search()
     settings.require_embeddings()
-    documents = load_corpus(args.corpus or resolve_corpus_dir(settings))
-    if not documents:
+    scan = scan_corpus(args.corpus or resolve_corpus_dir(settings))
+    if not scan.documents:
         raise CorpusEmpty("the corpus directory holds no .md file")
+    if not any(chunk_text(d.text, args.chunk_size, args.overlap) for d in scan.documents):
+        raise CorpusEmpty(
+            "no document has any text left after cleaning; nothing was uploaded or removed"
+        )
+    log.info(
+        "ingest files read",
+        documents=len(scan.documents),
+        skipped_outside_root=scan.skipped_outside_root,
+        skipped_unsafe=scan.skipped_unsafe,
+        skipped_unresolved=scan.skipped_unresolved,
+        cleaned=scan.cleaned,
+    )
 
+    timeout = settings.retrieval_timeout_seconds
     embeddings = get_embeddings()
     # Before the index is touched: a wrong dimension must not create a wrong index.
-    await check_embedding_dimensions(embeddings, settings.embedding_dimensions)
+    await check_embedding_dimensions(
+        embeddings, settings.embedding_dimensions, timeout_seconds=timeout
+    )
     index = build_index(settings.search_index or "", settings.embedding_dimensions)
     ensure_index(build_index_client(settings), index)
-    return await ingest_documents(
-        documents,
+    search_client = build_search_client(settings)
+    report = await ingest_documents(
+        scan.documents,
         embeddings=embeddings,
-        search_client=build_search_client(settings),
+        search_client=search_client,
         chunk_size=args.chunk_size,
         overlap=args.overlap,
         batch_size=args.batch_size,
         expected_dimensions=settings.embedding_dimensions,
+        timeout_seconds=timeout,
     )
+    report.skipped_outside_root = scan.skipped_outside_root
+    report.skipped_unsafe = scan.skipped_unsafe
+    report.skipped_unresolved = scan.skipped_unresolved
+    report.cleaned = scan.cleaned
+    if args.no_prune:
+        log.info("ingest stale chunks kept", reason="--no-prune")
+    elif report.failed:
+        log.warning("ingest stale chunks kept", reason="some uploads failed")
+    elif scan.skipped_unresolved:
+        # An unresolved file is not in the live set, though it may be a good document: keep chunks.
+        log.warning("ingest stale chunks kept", reason="some files could not be resolved")
+    else:
+        try:
+            report.removed, report.removal_failed = await prune_stale(
+                search_client,
+                live_ids=report.live_ids,
+                timeout_seconds=timeout,
+                force=args.force_prune,
+            )
+        except PruneRefused as refused:
+            log.warning(
+                "ingest stale chunks kept",
+                reason="too many",
+                stale=refused.stale,
+                total=refused.total,
+            )
+            report.removal_refused = True
+            print(f"ingest: {refused}", file=sys.stderr)
+    report.seconds = round(time.perf_counter() - started, 2)
+    return report
 
 
 def main() -> None:
@@ -433,9 +793,14 @@ def main() -> None:
         sys.exit(2)
     print(
         f"documents={report.documents} chunks={report.chunks} "
-        f"uploaded={report.uploaded} failed={report.failed} seconds={report.seconds}"
+        f"uploaded={report.uploaded} failed={report.failed} "
+        f"skipped_outside_root={report.skipped_outside_root} "
+        f"skipped_unsafe={report.skipped_unsafe} "
+        f"skipped_unresolved={report.skipped_unresolved} cleaned={report.cleaned} "
+        f"removed={report.removed} removal_failed={report.removal_failed} "
+        f"removal_refused={int(report.removal_refused)} seconds={report.seconds}"
     )
-    if report.failed:
+    if report.failed or report.removal_failed or report.removal_refused:
         sys.exit(1)
 
 
