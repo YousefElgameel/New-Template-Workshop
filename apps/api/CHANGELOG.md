@@ -7,6 +7,60 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-07
+
+### Added
+
+- **`POST /v1/conversations/{id}/ask`** (`app/routers/ask.py`; roadmap api 4.2): ask a question in a conversation and
+  get `{ message_id, answer, citations }`. `citations` are the retrieved documents whose `[n]` the answer cites, each
+  once, in citation order — `[]` when it cites none — built from retrieval only; the same list is stored on the
+  assistant message. Full contract and error table in `docs/reference/http-api.md`.
+  - The question is stored and committed **before** the model is called, so it survives a failure; the assistant
+    message (with citations and the output token count) is stored only once an answer exists. A conversation still
+    titled "New conversation" takes the question as its title; `updated_at` moves with each message.
+  - The model sees the conversation's last 10 messages (`app/ai/history.py`: `user` → human, `assistant` → AI, any
+    other role dropped — a stored row never becomes a system message — each row cut to 4,000 characters), then the
+    retrieved context, then the question.
+  - Errors: blank, missing or invalid `question` (or a body that is not `application/json`) → `422`; over 4,000
+    characters → `413 payload_too_large`; unknown conversation → `404`; **`429 busy`** when `AI_MAX_CONCURRENT_ASKS`
+    asks are already running (nothing stored); a model or search failure or timeout, an unconfigured AI layer or a
+    blank reply → `503 ai_unavailable` (question kept, no answer stored; no provider text in the body or the logs).
+  - Question and answer text are cleaned before storage: NUL and lone surrogates are dropped and control characters
+    other than tab, newline and carriage return become spaces, so no stored character costs more than 4 bytes in a
+    thread read. The answer is cut at 4,000 characters (ending in `…`).
+- **Three settings** (`.env.example`, `docker-compose.yml`, `docs/reference/environment-variables.md`):
+  `AI_MAX_OUTPUT_TOKENS` (default 1024; sent to the model as `max_completion_tokens`), `AI_RETRIEVAL_TIMEOUT_SECONDS`
+  (default 30; the query embedding and the search each get this long) and `AI_MAX_CONCURRENT_ASKS` (default 4; per
+  process). An unusable value falls back to the default.
+- `app/ai/limits.py` (`ask_slot`, released on success, failure and cancellation) and `app/ai/history.py`.
+- OpenAPI (`docs/reference/openapi.json`) and the web's generated types include the new route.
+
+### Changed
+
+- **A model-call span no longer carries provider error text** (`app/ai/telemetry.py`). It used the tracer's defaults,
+  which record the exception message as a span event and as the status text; a provider error can quote the request.
+  The span now records only `ai.error_kind` and a status without a description, as the database spans already did.
+- **The search client is bounded** (`app/ai/tools/retrieve.py`): it is built with the retrieval timeout as its
+  connect and read timeout and 2 retries, where azure-core's defaults are 300 s and 10 retries. A search the caller
+  gave up on now frees its worker thread within about that time instead of minutes. The same client serves ingestion.
+- `AzureSearchRetriever` raises `TimeoutError` when a step exceeds its budget; the chat model client carries the
+  output bound.
+- Worst-case duration of one ask is about **4 minutes** (model 60 s × 3 attempts, plus 30 s for each of the two
+  retrieval steps): whatever calls the route must wait longer than that.
+
+### Known limits
+
+- The body is read before the 4,000-character check (a 413 is not an early reject), so the BFF must cap the request
+  size, and the api has no size cap of its own yet (api roadmap 5.5).
+- A thread read is bounded to 500 messages, not by bytes: a thread of maximum-length emoji-only messages with very
+  long citation titles can exceed the BFF's 8 MiB limit (api roadmap 5.4). Ordinary threads fit with a wide margin.
+- The concurrency cap is per process and global, not per client: four slow asks can occupy every slot for up to about
+  4 minutes. A per-client rate limit or quota belongs at the BFF or the ingress. An ask may keep running after its
+  client disconnects, holding its slot until it finishes.
+- Conversations and messages have no per-conversation cap and no purge (decision 5).
+- The answer text is returned as the model wrote it (after cleaning); the web must not render raw HTML or load images
+  from it, and must show citation titles and paths as plain text.
+
 ## [0.7.0] — 2026-10-06
 
 ### Added

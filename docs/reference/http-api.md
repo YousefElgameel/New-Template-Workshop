@@ -24,6 +24,7 @@ removed in [ADR-0003](../adr/0003-remove-nestjs-api-layer.md).
 | POST   | `/v1/conversations`          | `apps/api`       | Start a conversation                                | Yes (`/v1`)      |
 | GET    | `/v1/conversations`          | `apps/api`       | List conversations, newest first                    | Yes (`/v1`)      |
 | GET    | `/v1/conversations/{id}`     | `apps/api`       | Open a conversation with its messages               | Yes (`/v1`)      |
+| POST   | `/v1/conversations/{id}/ask` | `apps/api`       | Ask a question; the answer cites the docs           | Yes (`/v1`)      |
 | GET    | `/api/v1/conversations`      | `apps/web` (BFF) | Proxies `GET /v1/conversations`                     | Yes (`/api/v1`)  |
 | POST   | `/api/v1/conversations`      | `apps/web` (BFF) | Proxies `POST /v1/conversations` (body ≤ 4 KB)      | Yes (`/api/v1`)  |
 | GET    | `/api/v1/conversations/[id]` | `apps/web` (BFF) | Proxies `GET /v1/conversations/{id}`                | Yes (`/api/v1`)  |
@@ -39,8 +40,8 @@ Business endpoints are `/v1/<feature>` on the api (routers attached to `v1_route
 ## `apps/api` — FastAPI (port 8000, origin `0c70`)
 
 Source: `apps/api/app/routes.py` (operational router, mounted at root by `app/main.py`).
-`app/routers/v1.py` defines `v1_router` (`prefix="/v1"`); `app/routers/conversations.py` is attached
-to it (`/v1/conversations`).
+`app/routers/v1.py` defines `v1_router` (`prefix="/v1"`); `app/routers/conversations.py` and
+`app/routers/ask.py` are attached to it (`/v1/conversations…`).
 
 ### `GET /ping`
 
@@ -174,6 +175,65 @@ A read never returns more than **500** messages: when a conversation holds more,
 returned (still oldest first) and `truncated` is `true`. `404 not_found` for an unknown id; `422` for an id that
 is not a UUID.
 
+### `POST /v1/conversations/{id}/ask` — ask a question
+
+Source: `apps/api/app/routers/ask.py` (roadmap api 4.2). The answer is written from the team's docs
+(retrieval, then the model — `app/ai/graph.py`) with the conversation's last 10 messages as history.
+
+```json
+// request
+{ "question": "Which port does the api listen on?" }
+
+// 200
+{
+  "message_id": "9c1e…",
+  "answer": "The api listens on port 8000 [1].",
+  "citations": [{ "title": "HTTP API reference", "path": "docs/reference/http-api.md" }]
+}
+```
+
+- **`question`** — trimmed; not blank; at most **4,000 characters** (characters, not bytes); no NUL character and
+  no invalid text (a lone surrogate from a JSON `\ud800` escape). A blank, missing or wrong-typed field is
+  `422 validation_error`; over the limit is `413 payload_too_large`. The body is read before it is checked, so
+  the BFF caps the request size too.
+- **`citations`** — the retrieved documents whose `[n]` the answer cites, each once, in citation order; `[]` when
+  it cites none (for example "I do not know"). They are built from what retrieval returned, never from text the
+  model wrote, and the same list is stored on the assistant message (so `GET /v1/conversations/{id}` returns it).
+  `title` and `path` are one bounded line each but **untrusted**: show them as plain text, never as markup or a
+  link target. The answer text is returned as the model wrote it (cut at 4,000 characters, ending in `…`): do not
+  render raw HTML or load images from it.
+- **What is stored, and when** — the question is stored and committed **first**, so it is kept whatever happens
+  next; the assistant message (with its citations and the output token count) is stored only after an answer
+  exists. The conversation's `updated_at` moves with each message, and a conversation still titled "New
+  conversation" takes the question (≤ 200 characters) as its title.
+- **History** — the 10 most recent earlier messages, oldest first, then the retrieved context, then the question.
+  Only `user` and `assistant` rows are replayed; a row of any other role is dropped, never sent as a system message.
+
+- **Text cleaning** — in the question and in the stored answer, NUL and lone surrogates are dropped and every
+  other control character except tab, newline and carriage return becomes a space (a control character costs 6
+  bytes as a JSON escape). So no stored character costs more than 4 bytes in a thread read, and ordinary
+  500-message threads fit the BFF's 8 MiB. A thread of maximum-length emoji-only messages with very long
+  citation titles can still exceed it; bounding a thread read by bytes is api roadmap 5.4.
+- **Replayed history** is cut to 4,000 characters per message.
+
+| Situation                                                                        | Status | `error`             |
+| -------------------------------------------------------------------------------- | ------ | ------------------- |
+| blank / missing / wrong-typed `question`, NUL, invalid text, `{id}` not a UUID   | 422    | `validation_error`  |
+| `question` longer than 4,000 characters                                          | 413    | `payload_too_large` |
+| no such conversation                                                             | 404    | `not_found`         |
+| `AI_MAX_CONCURRENT_ASKS` asks are already running in this process (default 4)    | 429    | `busy`              |
+| model or search failed or timed out, the AI layer is not configured, blank reply | 503    | `ai_unavailable`    |
+
+On `429` nothing was stored. On `503` the **question was kept** and no answer was stored; ask again to retry.
+No question, answer, passage, title or id is written to a log, a span, a metric or an event: the logs carry
+counts, a boolean for "answer was cut", and a bounded error kind.
+
+**Timing.** A normal answer takes a few seconds. The bounds: the model call has a 60 s timeout per attempt and 2
+retries (`AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_RETRIES`), the query embedding and the search each have 30 s
+(`AI_RETRIEVAL_TIMEOUT_SECONDS`), the answer is at most `AI_MAX_OUTPUT_TOKENS` (1,024) tokens. The worst case is
+therefore about **4 minutes**; whatever calls this route must wait longer than that (the BFF's default 10 s
+`fetchUpstream` timeout is far too short — web roadmap 3.1).
+
 ---
 
 ## `apps/web` — Next.js BFF demo routes (port 3000, origin `0eb0`)
@@ -238,6 +298,8 @@ and the same trace id in the `x-trace-id` header:
 | request body/query fails validation            | 422     | `validation_error` — fields logged, not echoed                                            |
 | `raise NotFound()` / `Conflict("<code>")`      | 404/409 | the class code or the one given                                                           |
 | `raise HTTPException(403, detail="read_only")` | 403     | `read_only` (a snake_case `detail` is the code; prose maps to the default for the status) |
+| a request body over a route's size limit       | 413     | `payload_too_large`                                                                       |
+| too many AI calls at once (`ask`)              | 429     | `busy`                                                                                    |
 | model/search not configured or unavailable     | 503     | `ai_unavailable`                                                                          |
 | anything else                                  | 500     | `internal_error` — kind + location logged only                                            |
 

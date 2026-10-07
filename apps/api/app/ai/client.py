@@ -70,6 +70,8 @@ def build_chat_model(
         "max_retries": s.max_retries,
         "temperature": temperature,
         "streaming": streaming,
+        # Output bound (api 4.2). The Azure client sends it as `max_completion_tokens`.
+        "max_tokens": s.max_output_tokens,
         # Ask Azure OpenAI to report token usage on the final streamed chunk too, so
         # telemetry sees input/output tokens for streamed answers (field verified in 1.6.6).
         "stream_usage": True,

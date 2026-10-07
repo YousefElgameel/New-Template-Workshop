@@ -84,6 +84,15 @@ path}` from the passage), never from anything the model wrote; the answer text i
 Markers inside code spans are not citations. A marker is one to three ASCII digits, so `invalid_citations` is a lower bound; the scan is linear
 and reads at most 200,000 characters.
 
+**The ask route** (`app/routers/ask.py`, `POST /v1/conversations/{id}/ask`) is the first use of the graph: it checks the
+question and the conversation, takes one of `AI_MAX_CONCURRENT_ASKS` slots (`limits.py`, else `429 busy`), reads the last
+10 messages as history (`history.py`: `user`/`assistant` only), stores and commits the question, runs `ask()`, and stores
+the answer (cut at 4,000 characters) with the passages it cites (`citations.py`). Any failure after the question is
+stored is `503 ai_unavailable` and stores no answer. Question and answer text are cleaned before they are
+stored (NUL and lone surrogates dropped, other control characters except tab/newline/CR become spaces). The model call is bounded by `AI_MAX_OUTPUT_TOKENS` and
+`AI_REQUEST_TIMEOUT_SECONDS`/`AI_MAX_RETRIES`, each retrieval step by `AI_RETRIEVAL_TIMEOUT_SECONDS`. Details and the
+error table: [`docs/reference/http-api.md`](../reference/http-api.md).
+
 **`streaming.py`.** `stream_answer()` drives the same graph with LangGraph's `updates` +
 `messages` stream modes and yields Server-Sent Events: `sources` (after retrieval), `token`
 (per model chunk), `done` (sources + usage) or `error` (a bounded `error_kind`, never the

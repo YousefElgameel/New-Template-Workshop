@@ -274,6 +274,7 @@ need a human with access._
   - 2026-10-06 — planned. Delegate to `observability-instrumenter` for the event.
   - 2026-10-06 — from the api 3.1 threat model (S5, G8, G13): key hardening and the redaction entries added to acceptance; now also depends on 3.5 (ingest hygiene). The 32-character minimum is a default chosen here — change it if the team prefers another.
   - 2026-10-06 — from the api 3.2 security review: the CLI prints a traceback for unexpected errors, which is fine for a person at a terminal; the endpoint must not.
+  - 2026-10-07 — from the api 4.2 security review: the api has no request-size cap (item 5.5); the ingest route takes no body, so it is not affected, but any admin route added later should not rely on the BFF to cap sizes.
 
 ### 3.4 — Corpus baked into the api image
 
@@ -317,6 +318,7 @@ need a human with access._
 - **notes:**
   - 2026-10-06 — planned from the api 3.1 threat model (T3, G3, G6). Runs after 3.2 so it changes the one ingestion code path once; 3.3 depends on it so the endpoint never exposes the unhardened job.
   - 2026-10-06 — after api 3.2: `.txt` is already dropped, `source` is already `docs/<relative path>`, and a non-UTF-8 file already fails the run — only the path-escape/symlink check, stale-chunk removal, the call timeouts, content cleaning and the `source` sanitising remain here. The threat model's pre-launch checklist says G6 is settled in 3.2; it is settled here instead (3.5) — update that line when this item closes.
+  - 2026-10-07 — after api 4.2: `build_search_client` now carries a 30 s connect/read timeout (`AI_RETRIEVAL_TIMEOUT_SECONDS`) and 2 retries, and ingestion uses that client, so the search upload is already bounded. The embedding calls and the index client (`build_index_client`) still need their own timeouts here.
 
 ## Phase 4 — Chat with citations (F1)
 
@@ -344,7 +346,7 @@ need a human with access._
 
 ### 4.2 — Ask in a conversation (JSON)
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [1.1, 2.1, 3.2, 4.1, 4.4]
 - **layers:** [endpoint, ai]
 - **acceptance:**
@@ -361,9 +363,13 @@ need a human with access._
   - the stored assistant text is capped so that 500 messages stay under the BFF's response limit; the cut is logged by kind only (the value is chosen at implementation, with a test at the boundary)
   - at most `AI_MAX_CONCURRENT_ASKS` asks (default 4, documented in `.env.example` and `environment-variables.md`) run at once in the process; one more is answered `429 busy` before anything is stored; the slot is released on every exit path (answer, error, cancellation)
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `cd apps/api && uv run pytest` → 649 passed (the new files: `tests/test_ask_api.py`, `tests/ai/test_ai_ask_support.py`); `uv run ruff check app tests alembic` clean (on Windows, `uv` may need to be on `PATH`)
+  - `uv run pytest tests/test_ask_api.py -v` → the test names read as the acceptance: answer and citations, order of events (question committed before the model), 422/413/404/429/503, history, cleaning, the cap, the slot cap with a real three-at-once overlap, no content in logs
+  - `docs/reference/http-api.md` → section `POST /v1/conversations/{id}/ask`; `docs/reference/openapi.json` lists the route with 200/404/413/422/429/500/503
+  - live check (human, see needs_human): after 1.2 is applied and the index is ingested, `curl -X POST localhost:8000/v1/conversations/<id>/ask -H "content-type: application/json" -d '{"question":"Which port does the api listen on?"}'` → `200` with `answer` and `citations` (create the conversation first with `POST /v1/conversations`)
 - **needs_human:**
-  - a live answer needs 1.2 applied and an ingested index (3.3); an agent checks only with fakes
+  - a live answer needs 1.2 applied and an ingested index (3.2's job run by you, or 3.3 once it exists); an agent checks only with fakes. Please try one real question and tell me whether the answer and its citations look right
+  - decide the Part B correction: ARCHITECTURE B4a lists `POST …/ask` errors as `404`, `413`, `503`; the route also returns `422` and `429 busy` (a proposal for the team to apply — not edited here)
 - **notes:**
   - 2026-10-06 — planned. The web hop timeout must exceed 60 s plus retries (rule 70) — note for the web roadmap.
   - 2026-10-06 — from the 1.1 security review: the request schema caps `question` at 4,000 characters, `citations` come only from retrieval results (never from the request body), each citation is `{title, path}` strings of bounded length, and `token_count` is non-negative.
@@ -371,6 +377,9 @@ need a human with access._
   - 2026-10-06 — from the api 3.1 threat model (AI-5, G2, G3) and the 4.1 security review: history role mapping, output bound, retrieval timeouts and the stored-size cap moved from notes into acceptance; passage delimiting and citation checks are item 4.4, which this item now depends on. Open decision (not planned): a cap on concurrent asks, so one client cannot spend the whole quota — the BFF/ingress rate limit (G1) belongs in the web roadmap.
   - 2026-10-06 — decisions taken by Claude on the developer's instruction to follow its recommendations: (1) citations are the cited subset, not every retrieved passage; (2) a process-wide cap on concurrent asks is in this item (the BFF/ingress rate limit stays a web-layer need); (3) `trace_id` is **not** stored on message rows — it would need a new migration on tables already applied, and logs carry the id per request (revisit with auth; threat model G14, R3).
   - 2026-10-06 — after api 4.4: `ask()` already logs `retrieved`/`cited`/`invalid` as counts — the route must not log them again, and must build the stored/returned `citations` with `cited_chunks` + `citation_of` (never from model text). `citation_of` returns one bounded line each for `title` and `path` but both are **untrusted text** (`<`, `(`, `javascript:` survive): the web must render them as plain text only (a text node, never an `href`, never markdown). `invalid_citations` is a lower bound. The security review also noted that the answer text itself is returned unrewritten, so the web must not auto-load images or render raw HTML from it.
+  - 2026-10-07 — started by Claude.
+  - 2026-10-07 — implemented by Claude. Files: `app/routers/ask.py` (new), `app/ai/history.py` and `app/ai/limits.py` (new), `app/ai/config.py`, `app/ai/client.py`, `app/ai/telemetry.py`, `app/ai/tools/retrieve.py`, `app/routers/v1.py`, tests `tests/test_ask_api.py` + `tests/ai/test_ai_ask_support.py` (new) and updated ones, docs (`http-api.md`, `environment-variables.md`, `ai.md`, api `CLAUDE.md`, `.claude/rules/70-ai.md`), `.env.example` (api and root), `docker-compose.yml`, regenerated `openapi.json` and the web's `api-types.ts`, CHANGELOG, api 0.8.0. Reviews: code-reviewer and security-reviewer. Fixed from them: the search client had azure-core's defaults (300 s, 10 retries) so a timed-out search stranded its thread — now bounded and tested against the real client; the `gen_ai.chat` span exported provider error text — fixed and tested with a real tracer provider; control characters made the "always fits 8 MiB" claim false (6-byte JSON escapes) — now cleaned, the false claim and its vacuous test removed; lone surrogates in answers; replayed history rows are cut; compose and root env files and the rules text synced; hang guards and order assertions in the tests. Mutation-checked: 37 mutations, all caught (one test hung on a regression and was fixed with a timeout). Not done here, planned as 5.4 and 5.5: a byte bound on a thread read and a request-size cap in the api; per-client rate limits belong at the BFF/ingress (web roadmap).
+  - 2026-10-07 — confirmed by Yousef Wahid. The live check against the real model and index has not been run yet (needs migration 1.2 applied and an ingested index).
 
 ### 4.3 — Streaming ask
 
@@ -468,3 +477,37 @@ need a human with access._
   - run the live eval tier against the dev Foundry deployment (`AZURE_AI_*` in `apps/api/.env`) and report the result — an agent cannot call the real model
 - **notes:**
   - 2026-10-06 — planned from the api 3.1 threat model (G12). The offline tier only pins the plumbing and the prompt's wording; this is the item that shows how the real model behaves under injection.
+
+### 5.4 — Bound a thread read by bytes
+
+- **status:** todo
+- **depends_on:** [4.2]
+- **layers:** [endpoint]
+- **acceptance:**
+  - `GET /v1/conversations/{id}` never returns more than about 4 MiB of message text: when the 500 most recent messages are larger than that, it returns fewer (the most recent ones, oldest first) and `truncated` is `true`
+  - the bound is on bytes as the response is written (UTF-8 length of content plus citations), not on characters, and the check does not read more rows than the 500 it already reads
+  - tests build a thread of 500 maximum-length emoji messages with long citation titles and prove the response stays under the bound; the BFF's 8 MiB response limit is never reached
+  - `docs/reference/http-api.md` and OpenAPI describe the byte bound next to the 500-message bound
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - none
+- **notes:**
+  - 2026-10-07 — planned from the api 4.2 reviews: a per-message cap (4,000 characters, 4 bytes each) cannot guarantee that 500 messages fit the BFF's 8 MiB limit; ordinary threads do, but a thread of emoji-only messages with 200-character titles can reach about 10 MB, after which the BFF returns an upstream error and the conversation cannot be opened. Changes the api 2.1 endpoint, hence a separate item.
+
+### 5.5 — Request-size cap in the api
+
+- **status:** todo
+- **depends_on:** []
+- **layers:** [endpoint]
+- **acceptance:**
+  - a request body larger than a configured limit (default 64 KB; `/v1/conversations/{id}/ask` and `POST /v1/conversations` need far less) is refused with `413 payload_too_large` and the standard error body, and the oversized body is not buffered whole: the limit is checked from `Content-Length` and while the body streams (a chunked upload is cut off at the limit)
+  - applies to every `/v1` route that reads a body, as one middleware; operational routes are unaffected; `x-trace-id` is echoed on the `413`
+  - the limit is documented in `.env.example` and `environment-variables.md`
+  - tests: a body over the limit with and without `Content-Length`, a body just under it, a streamed body with no length, and no effect on a normal ask
+- **how_to_test:**
+  - _(filled in by `/implement-next`)_
+- **needs_human:**
+  - decide whether the ingress (when one exists) should also cap request sizes; the api cap is a second line of defence
+- **notes:**
+  - 2026-10-07 — planned from the api 4.2 security review: FastAPI reads and parses the whole body before a route's own check runs (so `413` for a long question arrives only after the body is in memory several times over). The BFF caps its own requests (web roadmap 3.1), but the api may also be reached directly (threat model S3).

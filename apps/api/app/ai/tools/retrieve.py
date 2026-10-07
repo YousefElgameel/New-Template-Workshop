@@ -31,6 +31,9 @@ SOURCE_FIELD = "source"
 TITLE_FIELD = "title"
 VECTOR_FIELD = "content_vector"
 DEFAULT_TOP_K = 5
+# azure-core's defaults would be 300 s connect/read timeouts and 10 retries: a search that a
+# caller gave up on would keep its worker thread for minutes. Explicit and small instead.
+SEARCH_RETRY_TOTAL = 2
 
 
 class RetrievedChunk(TypedDict):
@@ -75,6 +78,9 @@ def build_search_client(
         endpoint=s.search_endpoint,
         index_name=index_name or s.search_index,
         credential=build_search_credential(s),
+        connection_timeout=s.retrieval_timeout_seconds,
+        read_timeout=s.retrieval_timeout_seconds,
+        retry_total=SEARCH_RETRY_TOTAL,
     )
 
 
@@ -86,6 +92,7 @@ class AzureSearchRetriever:
         search_client: Any,
         embeddings: Embeddings,
         *,
+        timeout_seconds: float | None = None,
         id_field: str = ID_FIELD,
         content_field: str = CONTENT_FIELD,
         source_field: str = SOURCE_FIELD,
@@ -94,6 +101,7 @@ class AzureSearchRetriever:
     ) -> None:
         self._client = search_client
         self._embeddings = embeddings
+        self._timeout = timeout_seconds
         self._id_field = id_field
         self._content_field = content_field
         self._source_field = source_field
@@ -120,9 +128,20 @@ class AzureSearchRetriever:
 
     async def retrieve(self, query: str, top_k: int = DEFAULT_TOP_K) -> list[RetrievedChunk]:
         started = time.perf_counter()
+        timeout = (
+            self._timeout
+            if self._timeout is not None
+            else get_ai_settings().retrieval_timeout_seconds
+        )
         try:
-            vector = await self._embeddings.aembed_query(query)
-            raw = await asyncio.to_thread(self._search, query, vector, top_k)
+            # Each step has its own budget; a timeout raises TimeoutError (the caller maps it
+            # to a bounded error). The search runs in a worker thread: cancelling the await
+            # frees the request, and the client built by `build_search_client` carries the same
+            # connect/read timeout and a small retry budget, so the thread ends soon after.
+            async with asyncio.timeout(timeout):
+                vector = await self._embeddings.aembed_query(query)
+            async with asyncio.timeout(timeout):
+                raw = await asyncio.to_thread(self._search, query, vector, top_k)
         except Exception:
             record_retrieval((time.perf_counter() - started) * 1000, "error")
             raise

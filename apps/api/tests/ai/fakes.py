@@ -8,6 +8,7 @@ from azure.core.exceptions import ResourceNotFoundError
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
+from pydantic import Field
 
 from app.ai.tools.retrieve import RetrievedChunk
 
@@ -137,3 +138,27 @@ class FakeIndexClient:
 
     def delete_index(self, name: str) -> None:
         self.deleted.append(name)
+
+
+class RecordingChatModel(GenericFakeChatModel):
+    """A scripted fake model that records every message list it is called with (``received``)."""
+
+    received: list[list[Any]] = Field(default_factory=list)
+
+    def _generate(self, messages: Any, *args: Any, **kwargs: Any) -> Any:
+        self.received.append(list(messages))
+        return super()._generate(messages, *args, **kwargs)
+
+
+def recording_chat_model(*answers: str, usage: bool = True) -> RecordingChatModel:
+    """Like ``fake_chat_model``, but records what it was sent."""
+    replies = [
+        AIMessage(
+            content=text,
+            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+            if usage
+            else None,
+        )
+        for text in answers
+    ]
+    return RecordingChatModel(messages=iter(replies))

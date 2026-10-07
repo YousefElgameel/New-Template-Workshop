@@ -18,6 +18,13 @@ AUTH_MODES = ("managed_identity", "api_key")
 DEFAULT_API_VERSION = "2024-10-21"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_RETRIES = 2
+# The longest answer the model may write, in tokens (api 4.2). ~4 characters per token in
+# English, so 1024 fits the 4,000-character cap on a stored answer.
+DEFAULT_MAX_OUTPUT_TOKENS = 1024
+# Each retrieval step (the query embedding, then the search) gets this long, in seconds.
+DEFAULT_RETRIEVAL_TIMEOUT_SECONDS = 30.0
+# Asks that may run at once in this process; one more is refused with 429 (api 4.2).
+DEFAULT_MAX_CONCURRENT_ASKS = 4
 # text-embedding-3-small / ada-002 produce 1536-dimensional vectors; large = 3072.
 DEFAULT_EMBEDDING_DIMENSIONS = 1536
 
@@ -40,6 +47,17 @@ def _float_env(name: str, default: float) -> float:
         return default
     try:
         parsed = float(raw)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = _env(name)
+    if raw is None:
+        return default
+    try:
+        parsed = int(raw)
     except ValueError:
         return default
     return parsed if parsed > 0 else default
@@ -69,6 +87,10 @@ class AISettings:
     allow_text_to_sql: bool
     # Directory of the `.md` corpus to ingest; None = the repository's docs/ (decision 1).
     corpus_dir: str | None = None
+    # Output bound for the chat model, retrieval step timeout, concurrent-ask cap (api 4.2).
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    retrieval_timeout_seconds: float = DEFAULT_RETRIEVAL_TIMEOUT_SECONDS
+    max_concurrent_asks: int = DEFAULT_MAX_CONCURRENT_ASKS
 
     @property
     def has_model(self) -> bool:
@@ -137,4 +159,11 @@ def get_ai_settings() -> AISettings:
         max_retries=max(0, max_retries),
         allow_text_to_sql=_bool_env("AI_ALLOW_TEXT_TO_SQL"),
         corpus_dir=_env("CORPUS_DIR"),
+        max_output_tokens=_positive_int_env("AI_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS),
+        retrieval_timeout_seconds=_float_env(
+            "AI_RETRIEVAL_TIMEOUT_SECONDS", DEFAULT_RETRIEVAL_TIMEOUT_SECONDS
+        ),
+        max_concurrent_asks=_positive_int_env(
+            "AI_MAX_CONCURRENT_ASKS", DEFAULT_MAX_CONCURRENT_ASKS
+        ),
     )

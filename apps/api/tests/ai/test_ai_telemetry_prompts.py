@@ -18,6 +18,9 @@ class _Span:
     def set_attribute(self, key: str, value: Any) -> None:
         self.attributes[key] = value
 
+    def set_status(self, status: Any) -> None:
+        self.attributes["_status"] = status
+
     def __enter__(self) -> _Span:
         return self
 
@@ -29,8 +32,9 @@ class _Tracer:
     def __init__(self) -> None:
         self.spans: list[tuple[str, _Span]] = []
 
-    def start_as_current_span(self, name: str) -> _Span:
+    def start_as_current_span(self, name: str, **kwargs: Any) -> _Span:
         span = _Span()
+        span.attributes["_kwargs"] = kwargs
         self.spans.append((name, span))
         return span
 
@@ -92,6 +96,42 @@ def test_model_call_span_records_failure_and_reraises(tracer: _Tracer, events) -
     assert span.attributes["ai.outcome"] == "error"
     assert span.attributes["ai.error_kind"] == "timeout"
     assert events[0][1]["error_kind"] == "timeout"
+
+
+def test_the_model_call_span_is_opened_without_exception_recording(tracer: _Tracer, events) -> None:
+    with telemetry.model_call_span("gpt"):
+        pass
+    _, span = tracer.spans[0]
+    assert span.attributes["_kwargs"] == {
+        "record_exception": False,
+        "set_status_on_exception": False,
+    }
+
+
+def test_a_provider_error_text_never_reaches_the_exported_span(monkeypatch, events) -> None:
+    """With a real tracer provider: the error text is on neither an event nor the status."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.trace import StatusCode
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(telemetry.trace, "get_tracer", lambda _name: provider.get_tracer("t"))
+    telemetry._reset_for_tests()
+
+    secret = "SECRET-PROVIDER-QUOTED-PROMPT-TEXT"
+    with pytest.raises(RuntimeError):
+        with telemetry.model_call_span("gpt"):
+            raise RuntimeError(f"Error code: 400 - {secret}")
+
+    (span,) = exporter.get_finished_spans()
+    assert span.events == ()  # no recorded exception event
+    assert span.status.status_code is StatusCode.ERROR and not span.status.description
+    assert span.attributes["ai.error_kind"] == "error" and span.attributes["ai.outcome"] == "error"
+    exported = repr(span.to_json())
+    assert secret not in exported and "RuntimeError" not in exported
 
 
 def test_record_retrieval_never_raises(events) -> None:

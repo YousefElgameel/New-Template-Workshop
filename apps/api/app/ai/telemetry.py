@@ -29,6 +29,7 @@ from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.metrics import Counter, Histogram
+from opentelemetry.trace import Status, StatusCode
 
 from app.events import track_event
 from app.logging_config import get_logger
@@ -125,6 +126,7 @@ def _finish(recorder: ModelCallRecorder, outcome: str, error: str | None, span: 
             span.set_attribute("ai.outcome", outcome)
             if error is not None:
                 span.set_attribute("ai.error_kind", error)
+                span.set_status(Status(StatusCode.ERROR))
     except Exception:  # noqa: BLE001
         pass
     event_attrs: dict[str, str | int | float | bool] = {
@@ -155,7 +157,12 @@ def model_call_span(deployment: str, operation: str = "chat") -> Iterator[ModelC
     """
     recorder = ModelCallRecorder(deployment=deployment, operation=operation)
     tracer = trace.get_tracer(_TRACER_NAME)
-    with tracer.start_as_current_span(f"gen_ai.{operation}") as span:
+    # record_exception / set_status_on_exception are off: a provider error's message can quote
+    # the request, and the default would put it on the span as an event and a status text.
+    # The failure is reported as a bounded kind (`ai.error_kind`) and a description-less status.
+    with tracer.start_as_current_span(
+        f"gen_ai.{operation}", record_exception=False, set_status_on_exception=False
+    ) as span:
         try:
             span.set_attribute("gen_ai.system", GEN_AI_SYSTEM)
             span.set_attribute("gen_ai.operation.name", operation)
