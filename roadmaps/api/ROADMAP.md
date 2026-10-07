@@ -556,18 +556,30 @@ need a human with access._
 
 ### 5.6 — Fit the ask deadline inside the ingress limit
 
-- **status:** todo
+- **status:** done
 - **depends_on:** []
 - **layers:** [ai]
 - **acceptance:**
   - the default `AI_MAX_RETRIES` is 1 (was 2), so one answer's worst case — the model's timeout times (retries + 1), plus the two retrieval steps — is 180 s at the other defaults, inside the 240 s request timeout of Azure Container Apps ingress; the worst case is computed in one place (not repeated as a number in several) and covered by a test that fails if the defaults add up to more than 220 s
   - `docs/reference/http-api.md`, `.env.example`, `environment-variables.md`, `apps/api/CLAUDE.md` and `.claude/rules/70-ai.md` give the new defaults and say why; the web BFF's 5 minute hop timeout is left as an upper bound
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `cd apps/api && uv run pytest tests/ai/test_ai_config_client.py tests/test_ask_deadline_startup.py tests/test_ask_json_deadline.py` → green; the whole suite `uv run pytest` → **857 passed, 4 skipped**; `uv run ruff check app tests alembic` clean (on Windows, `uv` may need to be on `PATH`)
+  - the number: `uv run python -c "from app.ai.config import get_ai_settings as g; s = g(); print(s.max_retries, s.worst_case_seconds, s.fits_the_ingress_limit)"` → `1 180.0 True`; with `AI_MAX_RETRIES=2` in the environment it prints `2 240.0 False`
+  - the startup warning: in PowerShell, `$env:AI_MAX_RETRIES=2; uv run uvicorn app.main:app --port 8000` → one WARNING `the ask deadline is longer than the ingress request timeout` with `worst_case_seconds=240.0 limit_seconds=220.0 ingress_seconds=240.0` and nothing else; without the variable there is no such line
+  - the deadline itself: `tests/test_ask_json_deadline.py` (a graph that never answers ends in `503 ai_unavailable` after the configured worst case, not after 30 s) and `tests/test_ask_stream_hardening.py` (the stream ends in an `error` frame, kind `timeout`)
+  - prove the tests bite: in `app/ai/config.py` put the default retries back to 2, drop the first attempt or one retrieval step from the formula, raise the margin; in `app/routers/ask.py` stop using `worst_case_seconds` (stream) or drop the `asyncio.timeout` (JSON route); in `app/main.py` drop the warning or let it raise: the matching tests fail (12 such changes tried, all caught)
 - **needs_human:**
-  - none
+  - none for the code. Two things to know: a deployment that sets `AI_MAX_RETRIES=2` (or longer timeouts) in its own environment keeps the old behaviour and gets the startup warning — check the Container Apps environment variables when the api is deployed (`infra/main.bicep` sets none today)
+  - the web's source comments still say the api's worst case is "about 4 minutes" (`apps/web/src/lib/ask-bff.ts`, the two ask route files, `apps/web/CLAUDE.md`); the values they describe (the 5 minute hop timeout) are unchanged and still an upper bound, only the wording is stale — say so and I will fix the comments as a web chore
+  - reply **done** to close the item, or tell me what to change
 - **notes:**
   - 2026-10-07 — planned from the ingress timeout decision of the threat model §8a (Azure Container Apps ingress: fixed 240 s request timeout, not configurable). Proposed by Claude on Yousef Wahid's instruction to decide; a project that wants more retries can set the variable and accepts the limit.
+  - 2026-10-07 — started by Claude.
+  - 2026-10-07 — implemented by Claude, awaiting test by Yousef Wahid. Files: `app/ai/config.py` (`DEFAULT_MAX_RETRIES` 1, `INGRESS_REQUEST_TIMEOUT_SECONDS`, `ASK_WORST_CASE_LIMIT_SECONDS`, `AISettings.worst_case_seconds`, `fits_the_ingress_limit`), `app/routers/ask.py` (the stream's deadline now comes from the property; the JSON route got the same deadline), `app/main.py` (the startup warning), `tests/ai/test_ai_config_client.py`, `tests/test_ask_deadline_startup.py` and `tests/test_ask_json_deadline.py` (new), `.env.example` (both), `docker-compose.yml`, `docs/reference/environment-variables.md` and `http-api.md`, `docs/architecture/ai.md`, `.claude/rules/70-ai.md`, api `CLAUDE.md`, the threat model (two lines), `CHANGELOG.md` + `pyproject.toml` + `uv.lock` (0.12.0). Review: `code-reviewer` (no security review: no boundary, external call or data path changed).
+  - 2026-10-07 — fixed after review: **MEDIUM** — the JSON `/ask` route had no overall deadline, so "180 s" was true only for the stream: the client's timeouts are per phase and a retry's wait (a 429's `Retry-After`) is not counted, so a slow provider could have outlasted the ingress limit and the caller would have seen a dropped connection instead of `503 ai_unavailable`; the JSON route now has the same `asyncio.timeout(worst_case_seconds)` and a test; `apps/api/CLAUDE.md` (named in the acceptance) was not updated; two stale "about 4 minutes" in `http-api.md` and the threat model; the formula's assumptions (each retrieval step has its own timeout; one model call, no tool loop) and what the 40 s margin is for are now written next to it.
+  - 2026-10-07 — DECISIONS: the margin is 40 s (limit 220 s of the 240 s): history read and question store come before the deadline starts and the answer store and `done` after it; version 0.12.0 (MINOR: a changed default and a new warning); the startup check swallows a mistyped AI setting (it is reported where the setting is used) rather than stopping the app.
+  - 2026-10-07 — not done, recorded: stale comments in `apps/web` (above); the Azure Search client has its own retry count (2, bounded by the asyncio timeout), separate from `AI_MAX_RETRIES`.
+  - 2026-10-07 — confirmed by Yousef Wahid.
 
 ### 5.7 — Secret scan of the corpus in CI
 

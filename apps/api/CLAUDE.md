@@ -78,7 +78,7 @@ this as a starting map; read the actual files when you need detail.
 - `../alembic/` + `../alembic.ini` — Alembic (async `env.py`, URL from `DATABASE_URL` via
   `app.config` — `apps/api/.env` is loaded first, as the service does — never from the ini); `versions/` holds one revision (`5228ef6b6604`, not applied) —
   migrations are never run by an agent.
-- `ai/` — the AI runtime (ADR-0009, rule 70): `config.py` (`AZURE_AI_*`/`AZURE_SEARCH_*`/`AI_*`),
+- `ai/` — the AI runtime (ADR-0009, rule 70): `config.py` (`AZURE_AI_*`/`AZURE_SEARCH_*`/`AI_*`; `AISettings.worst_case_seconds` = the model's timeout × (retries + 1) + 2 × the retrieval timeout, 180 s at the defaults, is the one deadline for an answer — the stream's and the JSON route's — and must stay under the ingress's fixed 240 s request timeout: the api warns at startup above 220 s),
   `client.py` (**the mock seam** — `get_chat_model()`/`get_embeddings()`, managed identity when
   deployed), `graph.py` (`build_graph()` → `retrieve → answer` LangGraph, `ask()`),
   `streaming.py` (`iter_answer`, SSE frames, `SseResponse`: write timeout + slot release), `tools/` (registry; `retrieve.py` Azure AI

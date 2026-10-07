@@ -21,7 +21,7 @@ ends: ``done``, ``error`` or the client leaving. The assistant message is stored
 answer exists, before ``done`` is sent (its ``message_id`` is that message's id). An answer that
 would reach 4,000 characters is cut at 3,999 plus an ellipsis, so what the client saw is exactly
 what is stored. The whole generation has one deadline (the model's attempts plus the two retrieval
-steps — about 4 minutes at the defaults), and a client that stops reading is dropped after 30 s
+steps — 180 s at the defaults), and a client that stops reading is dropped after 30 s
 (``app.ai.streaming.SseResponse``): a slow provider or a stalled reader cannot hold a slot for ever.
 
 Everything here is user content or model output: no question, answer, passage, title or id reaches a
@@ -208,7 +208,11 @@ async def _ask(conversation_id: UUID, question: str, session: AsyncSession, grap
     history = await _store_question(conversation_id, question, session)
 
     try:
-        answer = await ask(graph, question, history=history)
+        # The same overall deadline as the stream: the client's own timeouts are per phase, and a
+        # retry's wait is not counted in them, so without this a slow provider could outlast the
+        # ingress request timeout and the caller would see a dropped connection, not a 503.
+        async with asyncio.timeout(get_ai_settings().worst_case_seconds):
+            answer = await ask(graph, question, history=history)
     except Exception as exc:  # noqa: BLE001 - the client gets a bounded code, never the message
         _log.warning("ask failed", kind=error_kind(exc))
         raise AIUnavailable() from None
@@ -349,10 +353,7 @@ async def _answer_frames(
     # client's own timeouts are per read, so a provider that trickles tokens would otherwise keep
     # the slot for as long as it likes.
     settings = get_ai_settings()
-    budget = (
-        settings.request_timeout_seconds * (settings.max_retries + 1)
-        + 2 * settings.retrieval_timeout_seconds
-    )
+    budget = settings.worst_case_seconds
     loop = asyncio.get_running_loop()
     deadline = loop.time() + budget
 

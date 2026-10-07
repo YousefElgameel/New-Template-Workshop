@@ -171,7 +171,7 @@ Currently `done`: api 1.1 to 1.5, 2.1; web 1.1 to 1.2, 2.1, 2.2; api 4.1 (prompt
 ### 6.5 Denial of service and cost abuse
 
 Unauthenticated chat is a money endpoint. Per ask the platform does one embedding call, one hybrid search and one `gpt-4.1`
-completion (with up to 3 attempts per call because `AI_MAX_RETRIES` is 2), over a prompt of up to 4,000 characters of
+completion (with up to 3 attempts per call while `AI_MAX_RETRIES` was 2; the default is now 1, api 5.6), over a prompt of up to 4,000 characters of
 question, 10 history messages and 5 passages.
 
 | ID  | Threat                                                                                                                                                                                                                                                                              | Asset / entry point                       | L / I | Mitigation (item)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Layer | Status                                |
@@ -273,7 +273,7 @@ itself, and ADR-0013 to ADR-0015, are his to give — see the checklist in §10)
 ([Microsoft Learn](https://learn.microsoft.com/en-us/azure/container-apps/ingress-overview)); it is not configurable, so nothing in this
 repository can raise it. The api's worst case for one answer (60 s model timeout × 3 attempts, plus two 30 s retrieval steps) is about 4
 minutes, which is the same size. Proposed: the page uses the **streaming** route (the first bytes arrive within seconds); and the api's
-worst case is brought inside the limit by lowering the default model retries from 2 to 1 (worst case 180 s): item **api 5.6**. The
+worst case is brought inside the limit by lowering the default model retries from 2 to 1 (worst case 180 s): item **api 5.6** (implemented). The
 BFF → api hop timeout stays at 5 minutes (it is only an upper bound).
 
 ## 9. Residual-risk table

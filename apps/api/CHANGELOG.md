@@ -7,6 +7,25 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-07
+
+### Changed
+
+- **The default `AI_MAX_RETRIES` is 1 (was 2)** (roadmap api 5.6). One answer's worst case — the model's timeout for every
+  attempt plus the query embedding and the search — was 60 s × 3 + 2 × 30 s = 240 s, exactly the **240 s request
+  timeout of Azure Container Apps ingress**, which is fixed and cannot be raised
+  ([Microsoft Learn](https://learn.microsoft.com/en-us/azure/container-apps/ingress-overview)): a slow answer would
+  have been cut by the ingress instead of ending in an `error` frame. At the new default it is **180 s**. Set
+  `AI_MAX_RETRIES=2` back if you accept the risk (the api then warns at startup).
+- The worst case is worked out in one place, `AISettings.worst_case_seconds` (`app/ai/config.py`); the stream's overall
+  deadline uses it, so the two cannot drift.
+
+### Added
+
+- **A startup warning** when the configured worst case is over 220 s (the ingress limit less a margin): one WARNING,
+  `the ask deadline is longer than the ingress request timeout`, with the three numbers and nothing else. It never
+  stops startup, and a mistyped AI setting is still reported where it is used.
+
 ## [0.11.0] — 2026-10-07
 
 ### Added

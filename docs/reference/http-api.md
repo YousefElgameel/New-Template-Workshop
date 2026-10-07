@@ -232,10 +232,10 @@ On `429` nothing was stored. On `503` the **question was kept** and no answer wa
 No question, answer, passage, title or id is written to a log, a span, a metric or an event: the logs carry
 counts, a boolean for "answer was cut", and a bounded error kind.
 
-**Timing.** A normal answer takes a few seconds. The bounds: the model call has a 60 s timeout per attempt and 2
-retries (`AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_RETRIES`), the query embedding and the search each have 30 s
+**Timing.** A normal answer takes a few seconds. The bounds: the model call has a 60 s timeout per attempt and 1
+retry (`AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_RETRIES`), the query embedding and the search each have 30 s
 (`AI_RETRIEVAL_TIMEOUT_SECONDS`), the answer is at most `AI_MAX_OUTPUT_TOKENS` (1,024) tokens. The worst case is
-therefore about **4 minutes**, and Azure Container Apps ingress has a fixed **240 s** request timeout that this repository cannot raise: the page uses the streaming route (its first bytes arrive within seconds), and roadmap api 5.6 brings the worst case to 180 s by lowering the default retries; whatever calls this route must wait longer than that (the BFF's default 10 s
+therefore **180 s** (60 s × 2 attempts + 2 × 30 s), inside the fixed **240 s** request timeout of Azure Container Apps ingress that this repository cannot raise (the api warns at startup if its configuration adds up to more than 220 s; the old default of 2 retries was exactly 240 s). The page uses the streaming route, whose first bytes arrive within seconds; whatever calls this route must wait longer than that (the BFF's default 10 s
 `fetchUpstream` timeout is far too short — web roadmap 3.1).
 
 ### `POST /v1/conversations/{id}/ask/stream` — ask a question, streamed
@@ -277,7 +277,7 @@ data: {"message_id": "9c1e…", "input_tokens": 812, "output_tokens": 14, "citat
 - **The concurrency slot** (`AI_MAX_CONCURRENT_ASKS`) is held until the stream ends: `done`, `error` or the client
   leaving.
 - **Time bounds** — the whole generation has one deadline: the model's timeout × (retries + 1) plus the two
-  retrieval steps, about 4 minutes at the defaults. A provider that keeps trickling tokens past it ends in an
+  retrieval steps, 180 s at the defaults. A provider that keeps trickling tokens past it ends in an
   `error` frame with kind `timeout`. A client that accepts no bytes for 30 seconds is dropped: the connection
   ends and the slot is freed.
 - **Framing** — each frame is two physical lines. The JSON escapes every control character, and also U+2028,
@@ -288,7 +288,7 @@ data: {"message_id": "9c1e…", "input_tokens": 812, "output_tokens": 14, "citat
 - **The cap** — an answer that would reach 4,000 characters is cut at 3,999 plus `…`, and the model is no longer
   read, so what the client saw is exactly what is stored. (The JSON route cuts only above 4,000.)
 - **For the BFF and the page** — forward the stream unchanged (`streamUpstream` / `proxyStream`, not
-  `fetchUpstream`); the hop timeout must exceed the worst case of about 4 minutes. Show `sources` as soon as it
+  `fetchUpstream`); the hop timeout must exceed the worst case (180 s at the defaults). Show `sources` as soon as it
   arrives, and replace it with `done.citations` when `done` arrives. Titles and paths are untrusted text: show them
   as plain text.
 - No question, answer, passage, title or id is written to a log, a span or a metric. A database error while storing
@@ -414,8 +414,8 @@ in this order:
 - An api that cannot be reached, a reply that is not JSON, or an error body without the api's shape is
   `502 { error: "upstream_unreachable" | "upstream_error", target: "api", trace_id }`. A `200` that is not
   `text/event-stream` is a `502` too.
-- **Timeout.** The BFF → api hop timeout is 5 minutes (`ASK_HOP_TIMEOUT_MS`): above the api's worst case of about 4
-  minutes, so the 10 s `fetchUpstream` default does not cut an answer short. It also ends when the browser leaves, which
+- **Timeout.** The BFF → api hop timeout is 5 minutes (`ASK_HOP_TIMEOUT_MS`): above the api's worst case (180 s at the
+  defaults), so the 10 s `fetchUpstream` default does not cut an answer short. It also ends when the browser leaves, which
   frees the api's concurrency slot. The ingress in front of the web app has its own request timeout; this repo does not
   set it.
 - **A stream that breaks.** The frames are forwarded unchanged. If the api connection fails mid-answer, or more than

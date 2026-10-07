@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 
 import app.ai.client as client_mod
-from app.ai.config import AINotConfigured, get_ai_settings
+from app.ai.config import (
+    ASK_WORST_CASE_LIMIT_SECONDS,
+    DEFAULT_MAX_RETRIES,
+    INGRESS_REQUEST_TIMEOUT_SECONDS,
+    AINotConfigured,
+    get_ai_settings,
+)
 
 ENDPOINT = "https://ais-example.cognitiveservices.azure.com/"
 
@@ -40,7 +46,7 @@ class TestSettings:
         assert s.auth_mode == "managed_identity"
         assert s.has_model is False and s.has_embeddings is False and s.has_search is False
         assert s.request_timeout_seconds == 60.0
-        assert s.max_retries == 2
+        assert s.max_retries == 1
         assert s.embedding_dimensions == 1536
         assert s.allow_text_to_sql is False
         assert s.corpus_dir is None
@@ -82,7 +88,7 @@ class TestSettings:
         monkeypatch.setenv("AZURE_AI_EMBEDDING_DIMENSIONS", "0")
         s = get_ai_settings()
         assert s.request_timeout_seconds == 60.0
-        assert s.max_retries == 2
+        assert s.max_retries == DEFAULT_MAX_RETRIES
         assert s.embedding_dimensions == 1536
 
 
@@ -99,7 +105,7 @@ class TestClientFactory:
         assert model.deployment_name == "gpt-4o-mini"
         assert model.azure_endpoint == ENDPOINT
         assert model.temperature == 0.2
-        assert model.max_retries == 2
+        assert model.max_retries == DEFAULT_MAX_RETRIES
         assert model.azure_ad_token_provider is None
         assert called == []  # no identity credential in api_key mode
 
@@ -141,3 +147,54 @@ class TestClientFactory:
         assert client_mod.get_chat_model() is first
         client_mod._reset_for_tests()
         assert client_mod.get_chat_model() is not first
+
+
+class TestTheAskDeadline:
+    """One answer's worst case must fit inside the 240 s ingress request timeout (api 5.6)."""
+
+    def test_the_defaults_add_up_to_180_seconds(self) -> None:
+        s = get_ai_settings()
+        assert (s.request_timeout_seconds, s.max_retries, s.retrieval_timeout_seconds) == (
+            60.0,
+            1,
+            30.0,
+        )
+        assert s.worst_case_seconds == 180.0
+
+    def test_the_defaults_fit_the_ingress_limit_with_a_margin(self) -> None:
+        s = get_ai_settings()
+        assert s.fits_the_ingress_limit
+        assert (
+            s.worst_case_seconds <= ASK_WORST_CASE_LIMIT_SECONDS < INGRESS_REQUEST_TIMEOUT_SECONDS
+        )
+
+    def test_the_ingress_limit_is_the_documented_240_seconds(self) -> None:
+        assert INGRESS_REQUEST_TIMEOUT_SECONDS == 240.0
+        assert ASK_WORST_CASE_LIMIT_SECONDS == 220.0
+
+    def test_the_default_retry_count_is_one(self) -> None:
+        assert DEFAULT_MAX_RETRIES == 1
+
+    @pytest.mark.parametrize(
+        ("timeout", "retries", "retrieval", "expected"),
+        [
+            ("60", "1", "30", 180.0),
+            ("60", "2", "30", 240.0),  # the old defaults: exactly the ingress limit, no margin
+            ("45", "1", "20", 130.0),
+            ("30", "0", "10", 50.0),
+            ("60", "3", "30", 300.0),
+        ],
+    )
+    def test_the_worst_case_counts_every_attempt_and_both_retrieval_steps(
+        self, monkeypatch, timeout: str, retries: str, retrieval: str, expected: float
+    ) -> None:
+        monkeypatch.setenv("AI_REQUEST_TIMEOUT_SECONDS", timeout)
+        monkeypatch.setenv("AI_MAX_RETRIES", retries)
+        monkeypatch.setenv("AI_RETRIEVAL_TIMEOUT_SECONDS", retrieval)
+        assert get_ai_settings().worst_case_seconds == expected
+
+    def test_a_configuration_over_the_margin_does_not_fit(self, monkeypatch) -> None:
+        monkeypatch.setenv("AI_MAX_RETRIES", "2")  # the old default: 240 s
+        assert not get_ai_settings().fits_the_ingress_limit
+        monkeypatch.setenv("AI_MAX_RETRIES", "1")
+        assert get_ai_settings().fits_the_ingress_limit

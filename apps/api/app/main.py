@@ -28,6 +28,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.ai.config import (
+    ASK_WORST_CASE_LIMIT_SECONDS,
+    INGRESS_REQUEST_TIMEOUT_SECONDS,
+    get_ai_settings,
+)
 from app.body_limit import BodyLimitMiddleware
 from app.config import get_settings, load_local_env
 from app.db import dispose_engine
@@ -47,6 +52,23 @@ configure_logging()
 _log = get_logger("app.main")
 
 
+def _warn_if_the_ask_deadline_is_too_long() -> None:
+    """One answer's worst case must fit the ingress request timeout (Azure Container Apps: 240 s,
+    not configurable), or a slow answer is cut by the ingress instead of ending in an error frame.
+    Numbers only in the log. Never raises: a bad AI setting is reported where it is used."""
+    try:
+        ai = get_ai_settings()
+    except Exception:  # noqa: BLE001 — startup must not fail on an AI setting
+        return
+    if not ai.fits_the_ingress_limit:
+        _log.warning(
+            "the ask deadline is longer than the ingress request timeout",
+            worst_case_seconds=ai.worst_case_seconds,
+            limit_seconds=ASK_WORST_CASE_LIMIT_SECONDS,
+            ingress_seconds=INGRESS_REQUEST_TIMEOUT_SECONDS,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown hook: surface degraded mode loudly at boot."""
@@ -64,6 +86,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "— running with local stdout logging only",
             reason=state["reason"],
         )
+    _warn_if_the_ask_deadline_is_too_long()
     # First wired custom event (Phase 3): degraded mode → local line only.
     track_event("service.start")
     yield

@@ -17,7 +17,16 @@ from dataclasses import dataclass
 AUTH_MODES = ("managed_identity", "api_key")
 DEFAULT_API_VERSION = "2024-10-21"
 DEFAULT_TIMEOUT_SECONDS = 60.0
-DEFAULT_MAX_RETRIES = 2
+# One retry, not two: with the model timeout above and the retrieval steps below, one answer's worst
+# case is then 180 s, inside the ingress request timeout (see ``AISettings.worst_case_seconds``).
+DEFAULT_MAX_RETRIES = 1
+# Azure Container Apps ingress ends a request after this long and the setting cannot be changed
+# (https://learn.microsoft.com/en-us/azure/container-apps/ingress-overview).
+INGRESS_REQUEST_TIMEOUT_SECONDS = 240.0
+# What one answer's worst case may add up to: the ingress limit less a margin for what the sum does
+# not count: reading the history and storing the question before the model is called, and storing
+# the answer and sending ``done`` after it. A configuration above this logs a warning at startup.
+ASK_WORST_CASE_LIMIT_SECONDS = 220.0
 # The longest answer the model may write, in tokens (api 4.2). ~4 characters per token in
 # English, so 1024 fits the 4,000-character cap on a stored answer.
 DEFAULT_MAX_OUTPUT_TOKENS = 1024
@@ -91,6 +100,21 @@ class AISettings:
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     retrieval_timeout_seconds: float = DEFAULT_RETRIEVAL_TIMEOUT_SECONDS
     max_concurrent_asks: int = DEFAULT_MAX_CONCURRENT_ASKS
+
+    @property
+    def worst_case_seconds(self) -> float:
+        """The longest one answer can take: the model's timeout for every attempt (the first and
+        each retry) plus the two retrieval steps (the query embedding, then the search). The one
+        place this is worked out — the stream's deadline, the JSON route's deadline, the startup
+        check and the tests use it. Each retrieval step has its own asyncio timeout, so retries
+        inside the embedding client cannot stretch the ``2 *`` term. It assumes the answer graph is
+        retrieve then one model call (no tool loop): add tools and it is a lower bound."""
+        attempts = self.max_retries + 1
+        return self.request_timeout_seconds * attempts + 2 * self.retrieval_timeout_seconds
+
+    @property
+    def fits_the_ingress_limit(self) -> bool:
+        return self.worst_case_seconds <= ASK_WORST_CASE_LIMIT_SECONDS
 
     @property
     def has_model(self) -> bool:
