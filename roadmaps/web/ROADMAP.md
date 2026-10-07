@@ -81,7 +81,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 1.3 — Keep resource ids off the web's telemetry spans
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [1.2]
 - **layers:** [bff]
 - **acceptance:**
@@ -89,11 +89,21 @@ conversation surface (decision 18) — the removal is item 4.1._
   - a test shows the id on a span without the scrub (a control) and its absence with it, using an in-memory exporter; the hook is wired where the telemetry is initialised and is fail-safe (it can never break a request)
   - `.claude/rules/60-observability.md` and `apps/web/CLAUDE.md` say so, and the "known gap" notes are removed
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm test` in `apps/web` — expect **25 files, 532 tests** passed (new: `src/lib/telemetry-scrub.test.ts`, 18 tests, plus two wiring tests in `observability.test.ts`); `pnpm typecheck` and `pnpm build` clean
+  - the tests export spans with an in-memory exporter: a **control** shows the id on a span without the scrub (hand-built inbound span attributes, Next's fetch span name, and the outbound span of a real `fetch` to a local server through the undici instrumentation), and the same spans without it once the processor and the hook are on
+  - **against a real Application Insights** (needs the connection string, so a human step): run the web with `APPLICATIONINSIGHTS_CONNECTION_STRING` set, open a conversation on `/chat` and ask a question, then in Log Analytics `AppRequests | union AppDependencies | where Url matches regex "[0-9a-f]{8}-[0-9a-f]{4}-" or tostring(Properties) matches regex "[0-9a-f]{8}-[0-9a-f]{4}-"` should return no rows for the last few minutes (`AppTraces` and `AppExceptions` should be clean too)
+  - prove the tests bite: in `src/lib/telemetry-scrub.ts` make `scrubIds` return its input, drop `next.span_name` from the list, drop the undici hook's result or the `onEnd` pass; or in `observability.ts` drop the processor or the hook: the matching tests fail (16 such changes tried; 3 are layered defences that only fail together, each of the span-name pass at start, the span-name pass at end and `onEnding` is covered by one of the others)
 - **needs_human:**
-  - none
+  - confirm in a real Application Insights (query above) that no conversation id shows up in `AppRequests`, `AppDependencies` (including `Properties`), `AppTraces` or `AppExceptions` — I could not run the real distro or a real exporter from here
+  - reply **done** to close the item, or tell me what to change
 - **notes:**
   - 2026-10-06 — added from the web 1.2 security review (MEDIUM). Conversations are shared and personal-data-capable (ADR-0014); an id is not a secret once the list endpoint exists, but it should not be exported to Application Insights either. Touches `src/lib/observability.ts` (the distro's http and undici instrumentation options), which is why it is its own item. Do it before the pages ship.
+  - 2026-10-07 — started by Claude.
+  - 2026-10-07 — implemented by Claude, awaiting test by Yousef Wahid. Files: `src/lib/telemetry-scrub.ts` (new) and its test, `src/lib/observability.ts` (`spanProcessors` + the undici `startSpanHook`) and its test, `apps/web/CLAUDE.md`, `.claude/rules/60-observability.md`, `CHANGELOG.md`, `package.json` (0.6.1) and `pnpm-lock.yaml` (two dev dependencies, +6 lines). Reviews: `code-reviewer` and `security-reviewer`; no CRITICAL; one real leak found and fixed.
+  - 2026-10-07 — fixed after review: Next patches `fetch` and gives its own span the name `fetch GET http://api:8000/v1/conversations/<uuid>` and the attribute `next.span_name`, which the Azure exporter sends as a custom dimension — that carried the id although the four attributes named in the acceptance were clean. The span name and `next.span_name` are scrubbed too; the scrub also runs in `onEnding` (while `setAttribute` still works) and one attribute that cannot be written no longer stops the others.
+  - 2026-10-07 — DECISIONS: a PATCH (0.6.1): nothing a consumer sees changes. Two dev dependencies, `@opentelemetry/sdk-trace-base` and `-node`, exactly 2.7.1 — the versions the Azure distro already installs; the lockfile was edited by hand to add only their importer entries (a normal `pnpm add` also re-resolved `postcss` and added peer suffixes) and checked with `pnpm install --frozen-lockfile`.
+  - 2026-10-07 — not done, recorded: only UUIDs are matched (an id in another format would pass); the exporter's name for a request without `http.route` reads `%7Bid%7D` (URL encoding of the braces, cosmetic); exception messages are not scrubbed (today they are generic network errors); the real distro and Next's tracer are not exercised offline.
+  - 2026-10-07 — confirmed by Yousef Wahid.
 
 ## Phase 2 — Conversation history (F2)
 

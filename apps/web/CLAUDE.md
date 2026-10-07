@@ -40,8 +40,10 @@ URL.
   timeout (`413`/`400`; the api reads a whole body before validating it), and `callApi` (api status + JSON pass
   through; `502` for an unreachable api, a redirect, a non-JSON or over-8-MiB reply, or an error body that is not
   the api's `{ error, trace_id }`). Routes log their PATTERN, never the URL (it holds an id); in Next 16 `params` is
-  a promise. Both modes are tested in `routes.test.ts`. **Known gap:** the web's own request/outbound spans still
-  carry the concrete id (`http.target`, `url.full`); the api scrubs it, the web does not yet (roadmap web 1.3).
+  a promise. Both modes are tested in `routes.test.ts`. The web's own request and outbound spans never carry the
+  concrete id either: `src/lib/telemetry-scrub.ts` rewrites every UUID in `http.target`, `http.url`, `url.path` and
+  `url.full` — and Next's `next.span_name` and its fetch span's name, which carry the upstream URL — to `{id}` (`IdScrubSpanProcessor` passed to the Azure distro, plus the undici instrumentation's
+  `startSpanHook`); fail-safe, tested with an in-memory exporter. Any new id-bearing route is covered if its ids are UUIDs.
 - `src/app/api/v1/assistant/ask/route.ts` + `ask/stream/route.ts` — **example business routes**
   (JSON + SSE) that proxy `${API_BASE_URL}/v1/assistant/…` or, with `MOCK_UPSTREAM=true`, serve
   `src/mocks/assistant.ts` (the template's single-turn demo; removed in roadmap web 4.1).

@@ -27,6 +27,13 @@
  */
 
 import { hostname } from 'node:os';
+import { IdScrubSpanProcessor, scrubbedRequestAttributes } from './telemetry-scrub';
+
+type SpanProcessor = NonNullable<
+  NonNullable<
+    Parameters<typeof import('@azure/monitor-opentelemetry').useAzureMonitor>[0]
+  >['spanProcessors']
+>[number];
 
 interface ObservabilityState {
   enabled: boolean;
@@ -215,6 +222,9 @@ export async function initObservability(): Promise<ObservabilityState> {
       // telemetry. OTEL_TRACES_SAMPLER* env vars still override these.
       samplingRatio: sampling.ratio,
       tracesPerSecond: 0,
+      // Resource ids (a conversation id in the request target) stay off every span, inbound and
+      // outbound: see `telemetry-scrub.ts`. Fail-safe; it can never break a request.
+      spanProcessors: [new IdScrubSpanProcessor() as unknown as SpanProcessor],
     });
 
     // Gap-closers the distro does NOT register (verified in 1.18.1 — its
@@ -234,7 +244,12 @@ export async function initObservability(): Promise<ObservabilityState> {
       import('@opentelemetry/instrumentation-runtime-node'),
     ]);
     registerInstrumentations({
-      instrumentations: [new UndiciInstrumentation(), new RuntimeNodeInstrumentation()],
+      instrumentations: [
+        // `startSpanHook` replaces the URL attributes before the span exists, so the outbound span to
+        // the api never carries the concrete id (the span processor above is the second line).
+        new UndiciInstrumentation({ startSpanHook: scrubbedRequestAttributes }),
+        new RuntimeNodeInstrumentation(),
+      ],
     });
 
     setState({ enabled: true, reason: 'ok' });

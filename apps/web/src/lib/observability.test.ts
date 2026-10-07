@@ -18,6 +18,7 @@ import {
   resolveAuthMode,
   resolveSamplingRatio,
 } from './observability';
+import { scrubbedRequestAttributes } from './telemetry-scrub';
 
 vi.mock('@azure/identity', () => ({
   ManagedIdentityCredential: class MockManagedIdentityCredential {
@@ -39,7 +40,9 @@ vi.mock('@opentelemetry/instrumentation', () => ({
   registerInstrumentations: (...args: unknown[]) => mockRegisterInstrumentations(...args),
 }));
 vi.mock('@opentelemetry/instrumentation-undici', () => ({
-  UndiciInstrumentation: class UndiciInstrumentation {},
+  UndiciInstrumentation: class UndiciInstrumentation {
+    constructor(public config?: unknown) {}
+  },
 }));
 vi.mock('@opentelemetry/instrumentation-runtime-node', () => ({
   RuntimeNodeInstrumentation: class RuntimeNodeInstrumentation {},
@@ -207,6 +210,26 @@ describe('idempotent init (process-global guard)', () => {
     const state = await initObservability();
     expect(state.enabled).toBe(false);
     expect(mockUseAzureMonitor).not.toHaveBeenCalled();
+  });
+});
+
+describe('resource ids stay off the spans (web roadmap 1.3)', () => {
+  it('registers the id-scrubbing span processor with the distro', async () => {
+    process.env.APPLICATIONINSIGHTS_CONNECTION_STRING = FAKE_CONNECTION_STRING;
+    await initObservability();
+    const options = mockUseAzureMonitor.mock.calls[0][0] as { spanProcessors?: object[] };
+    expect(options.spanProcessors?.map((p) => p.constructor.name)).toEqual([
+      'IdScrubSpanProcessor',
+    ]);
+  });
+
+  it('hands the undici instrumentation the hook that scrubs the outbound URL', async () => {
+    process.env.APPLICATIONINSIGHTS_CONNECTION_STRING = FAKE_CONNECTION_STRING;
+    await initObservability();
+    const arg = mockRegisterInstrumentations.mock.calls[0][0] as {
+      instrumentations: { config?: { startSpanHook?: unknown } }[];
+    };
+    expect(arg.instrumentations[0].config?.startSpanHook).toBe(scrubbedRequestAttributes);
   });
 });
 

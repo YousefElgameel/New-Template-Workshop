@@ -148,7 +148,10 @@ The structured stdout line is the source of truth; export is a **tee**, never a 
   (`http.target`, `http.url`; `url.path`/`url.full` under the stable conventions), so `GET /v1/conversations/<uuid>`
   would export the id even though `http.route` and the metrics use the pattern. `scrub_ids_server_hook`
   (`app/observability.py`, passed as `server_request_hook`) rewrites UUIDs in those attributes to `{id}`. Any new
-  id-bearing route is covered if its ids are UUIDs; anything else needs its own scrub.
+  id-bearing route is covered if its ids are UUIDs; anything else needs its own scrub. **The web does the same**
+  (`src/lib/telemetry-scrub.ts`): an `IdScrubSpanProcessor` registered through the distro's `spanProcessors` (inbound
+  and outbound spans, at start and at end) plus the undici instrumentation's `startSpanHook` rewrite UUIDs in
+  `http.target`, `http.url`, `url.path` and `url.full` — plus `next.span_name` and the span name, which Next's patched `fetch` sets to the upstream URL — to `{id}`; fail-safe, tested with an in-memory exporter. Only UUIDs are matched.
 - **No driver text on DB spans.** The instrumentor's own hooks would put SQL Server's raw message (which can
   quote user content) on the span: `handle_error` as the status description of a failed statement, and the
   `connect` span as an exception event + status of a failed connection. `hide_driver_error_text`

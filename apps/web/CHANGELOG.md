@@ -7,6 +7,24 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-07
+
+### Fixed
+
+- **Resource ids no longer reach Application Insights from the web's own spans** (web roadmap 1.3). The inbound request
+  span of `GET /api/v1/conversations/<uuid>` and the outbound span to the api carried the concrete conversation id in
+  `http.target`, `http.url`, `url.path` and `url.full`, although the route class, the logs and the metrics used the
+  pattern. Every UUID in those four attributes — and in `next.span_name` and the name of Next's own fetch span (`fetch GET http://api/v1/conversations/<id>`), which the Azure exporter would send as a custom dimension — is now `{id}` (`src/lib/telemetry-scrub.ts`, as the api does with
+  `scrub_ids_server_hook`): an `IdScrubSpanProcessor` registered with the Azure distro covers inbound and outbound spans
+  when they start and again when they end, and the undici instrumentation's `startSpanHook` keeps the id off the
+  outbound span from the start. Both are fail-safe (they swallow their own errors) and tested with an in-memory exporter
+  — including a real `fetch` — against a control that shows the id without them.
+
+### Changed
+
+- Two dev dependencies for those tests: `@opentelemetry/sdk-trace-base` and `@opentelemetry/sdk-trace-node`, pinned to
+  2.7.1 — the versions the Azure distro already installs.
+
 ## [0.6.0] — 2026-10-07
 
 ### Added
@@ -173,7 +191,7 @@ The two services version independently.
   URL — and label the duration metric with the route pattern. With `MOCK_UPSTREAM=true` they serve the fixtures from
   0.1.1 (honouring `limit`). Helpers in `src/lib/conversations-bff.ts`. Nothing in the UI calls them yet (roadmap web 2.2).
 - **Mock mode ignores whitespace and case in `APP_ENV`**: `" PROD "` is refused like `prod` (`src/lib/mocks.ts`).
-  **Known gap:** the web's own spans still carry the concrete conversation id (roadmap web 1.3).
+  (The web's own spans carried the concrete conversation id until 0.6.1.)
 
 ## [0.1.1] — 2026-10-06
 
