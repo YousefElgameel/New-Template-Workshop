@@ -3,7 +3,7 @@ import { log } from '@/lib/logger';
 import { isMockUpstream, mockJson } from '@/lib/mocks';
 import { askSignal, readAskRequest } from '@/lib/ask-bff';
 import { callApi } from '@/lib/conversations-bff';
-import { conversationAskResponse, findConversationFixture } from '@/mocks/conversations';
+import { conversationAskResponse, mockConversationExists } from '@/mocks/conversations';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +30,7 @@ export async function POST(
       log('info', 'bff inbound', { route: ROUTE, method: 'POST' });
 
       if (isMockUpstream()) {
-        return findConversationFixture(id.toLowerCase())
+        return mockConversationExists(id.toLowerCase())
           ? mockJson(conversationAskResponse, traceId)
           : mockJson({ error: 'not_found', trace_id: traceId }, traceId, 404);
       }

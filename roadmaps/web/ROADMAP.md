@@ -219,7 +219,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 3.3 — Send a question into the open conversation
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [2.2, 3.1, 3.2]
 - **layers:** [ui]
 - **acceptance:**
@@ -230,11 +230,28 @@ conversation surface (decision 18) — the removal is item 4.1._
   - sending with no conversation selected creates one first
   - works against `MOCK_UPSTREAM=true` fixtures until api:4.3 lands
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm test` in `apps/web` — expect **24 files, 512 tests** passed (new: ~25 in `ChatWorkspace.test.tsx`, plus `MessageInput`, `ChatThread` and mock-fixture cases); `pnpm typecheck` clean; `pnpm build` lists `○ /chat`
+  - **in a browser, against the mocks:** put `MOCK_UPSTREAM=true` in `apps/web/.env.local`, run `pnpm dev`, open http://localhost:3000/chat, then:
+    - click **+ New chat**, type a question, press Enter → the question appears at once, **Send** and the box are disabled, the answer streams in word by word, a **Sources** list appears with the first frame and is then cut down to the cited documents, the row moves to the top and takes the question as its title, the box is enabled and focused again
+    - the counter under the box reads `0 / 4,000`; paste 4,001 characters → it turns red and says "too long to send", Send stays disabled
+    - open a listed conversation (for example "Error contract"), ask there → it keeps its title and moves to the top
+    - start a question and click another conversation while it streams → the stream stops and nothing from it shows up
+    - the failure state is not reachable from the page against the mocks (the failing stream needs `?mock=failure`); the tests cover it. To see it live: mocks off, start the api **without** the Azure AI settings and ask → the question shows `Something went wrong (ai_unavailable)` with a Trace ID and a **Retry** button, and the box works again
+  - **against the real api** (optional, spends model tokens): turn the mock off, start the api, ask a real question and reopen the conversation: the answer and its citations are the stored ones
+  - prove the tests bite: in `ChatWorkspace.tsx` drop `stopStream()` from `openConversation`, the `refocusInput` effect, the `encodeURIComponent`, the `sendSeq` check or the failed-question reset; in `MessageInput.tsx` drop the code-point count or the over-limit check: the matching tests fail (27 such changes tried; one — the second `streamAbort` guard in `send` — is only defence in depth, because React re-renders between two clicks)
 - **needs_human:**
-  - try the full flow in a browser against the mocks (new chat, ask, citations, a forced failure) and confirm the behaviour matches the wireframe states
+  - try the full flow in a browser against the mocks (new chat, ask, citations, a forced failure) and confirm the behaviour matches the wireframe states — I could not open a browser from here
+  - check with a screen reader (NVDA or VoiceOver) that the finished answer is announced once; the newest message is a live region marked busy while it streams, which readers handle differently
+  - reply **done** to close the item, or tell me what to change
 - **notes:**
   - 2026-10-06 — planned.
+  - 2026-10-07 — started by Claude.
+  - 2026-10-07 — implemented by Claude, awaiting test by Yousef Wahid. Files: `ChatWorkspace.tsx` (send, retry, `stopStream`), `MessageInput.tsx` (`maxChars` counter; `keepText` removed), `ChatThread.tsx` (`onRetry`, live region), `mocks/conversations.ts` (`mockConversationExists`) and the two ask routes' mock branch, their tests, `apps/web/CLAUDE.md`, `CHANGELOG.md` + `package.json` (0.6.0). Reviews: `code-reviewer` and `security-reviewer`; no CRITICAL/HIGH.
+  - 2026-10-07 — fixed after review: focus was set while the input was still disabled (it now returns once the input is enabled again — the first test could not have told); the conversation id is encoded in the ask URL; a chat created for a question stays in the list if the person went elsewhere meanwhile; a question that failed before a chat existed is not carried into the next one; the list clock is read outside the state updater; the counter's id is unique (`useId`); the mock fixture lookup no longer matches `Object.prototype` names.
+  - 2026-10-07 — DECISIONS: a failed answer leaves no half answer (the placeholder is removed, the error shows under the question with Retry); Retry sends the question again at the end of the thread, so the api stores it twice; the list's order and title after an answer are updated locally, not re-read; opening another conversation or a new chat ends the answer in flight, and clicking the row that is already open does the same; the input is disabled while the thread is loading or failed to load.
+  - 2026-10-07 — not done, recorded: an api-side idempotency key so a retry is not stored twice; the web 2.2 how_to_test still mentions the "sending is not available yet" notice that this item removed.
+  - 2026-10-07 — version 0.6.0 (MINOR: new behaviour on `/chat`, backward compatible).
+  - 2026-10-07 — confirmed by Yousef Wahid.
 
 ## Phase 4 — Cleanup and go-live
 

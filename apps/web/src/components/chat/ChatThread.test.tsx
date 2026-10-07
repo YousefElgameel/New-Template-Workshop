@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatThread } from './ChatThread';
+import type { ChatMessage } from './types';
 
 const TRACE = '0c700' + 'd'.repeat(27);
 
@@ -99,5 +101,48 @@ describe('<ChatThread />', () => {
     );
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('b')).toBeNull();
+  });
+
+  describe('retry and the live region', () => {
+    const failed: ChatMessage = {
+      id: 'u1',
+      role: 'user',
+      text: 'Which port?',
+      error: { kind: 'timeout', traceId: '0c700' + 'd'.repeat(27) },
+    };
+
+    it('offers Retry under a failed question when a handler is given, and calls it with that message', async () => {
+      const onRetry = vi.fn();
+      render(<ChatThread messages={[failed]} onRetry={onRetry} />);
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
+      expect(onRetry).toHaveBeenCalledWith(failed);
+    });
+
+    it('shows no Retry without a handler, nor under an assistant message', () => {
+      const { rerender } = render(<ChatThread messages={[failed]} />);
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+      rerender(
+        <ChatThread
+          messages={[{ id: 'a1', role: 'assistant', text: '', error: { kind: 'timeout' } }]}
+          onRetry={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    });
+
+    it('makes only the newest message a live region, busy while it streams', () => {
+      const messages: ChatMessage[] = [
+        { id: 'u1', role: 'user', text: 'q' },
+        { id: 'a1', role: 'assistant', text: 'partial', pending: true },
+      ];
+      const { rerender } = render(<ChatThread messages={messages} />);
+      const items = screen.getAllByRole('listitem');
+      expect(screen.getByRole('list', { name: 'Conversation' })).not.toHaveAttribute('aria-live');
+      expect(items[0]).not.toHaveAttribute('aria-live');
+      expect(items[1]).toHaveAttribute('aria-live', 'polite');
+      expect(items[1]).toHaveAttribute('aria-busy', 'true');
+      rerender(<ChatThread messages={[messages[0], { ...messages[1], pending: false }]} />);
+      expect(screen.getAllByRole('listitem')[1]).toHaveAttribute('aria-busy', 'false');
+    });
   });
 });

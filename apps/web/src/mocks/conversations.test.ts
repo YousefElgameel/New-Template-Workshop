@@ -13,6 +13,7 @@ import {
   emptyConversationList,
   failureTraceId,
   findConversationFixture,
+  mockConversationExists,
 } from '@/mocks/conversations';
 
 /**
@@ -205,5 +206,11 @@ describe('ask fixtures', () => {
 
     const failing = mockSse(conversationAskFailureFrames, 'a'.repeat(32), 0);
     expect(await failing.text()).toBe(conversationAskFailureFrames.join(''));
+  });
+
+  it('lets a mocked ask target a listed conversation or the one a new chat creates, and nothing else', () => {
+    for (const id of Object.values(conversationIds)) expect(mockConversationExists(id)).toBe(true);
+    expect(mockConversationExists('5b1f3a52-8c1e-4d3a-9d0b-1a2b3c4d5eff')).toBe(false);
+    expect(mockConversationExists('toString')).toBe(false);
   });
 });

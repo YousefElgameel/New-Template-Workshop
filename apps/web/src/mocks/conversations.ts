@@ -145,9 +145,17 @@ export const conversationDetails: Record<string, ConversationDetail> = {
   },
 };
 
+/**
+ * Whether a mocked ask may target this conversation: a listed one, or the one `POST` creates —
+ * so "new chat, then ask" works against the mocks.
+ */
+export function mockConversationExists(id: string): boolean {
+  return Object.hasOwn(conversationDetails, id) || id === conversationIds.created;
+}
+
 /** The fixture a mocked `GET /api/v1/conversations/{id}` serves, or undefined (→ 404). */
 export function findConversationFixture(id: string): ConversationDetail | undefined {
-  return conversationDetails[id];
+  return Object.hasOwn(conversationDetails, id) ? conversationDetails[id] : undefined;
 }
 
 /** `POST /api/v1/conversations/{id}/ask` → 200. */

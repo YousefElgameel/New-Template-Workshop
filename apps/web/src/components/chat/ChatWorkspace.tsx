@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { askStream } from '@/lib/chat-client';
 import type { Citation, ConversationListItem, ConversationMessage } from '@/lib/conversation-types';
 import { createConversation, getConversation, listConversations } from '@/lib/conversations-client';
 import { ChatThread } from './ChatThread';
 import { ConversationList } from './ConversationList';
 import { MessageInput } from './MessageInput';
-import type { ChatMessage } from './types';
+import type { ChatError, ChatMessage } from './types';
 
 /** A failed BFF call, as the page shows it: the bounded code and the id to quote. */
 interface Failure {
@@ -36,11 +37,36 @@ function ErrorLine({ what, failure }: Readonly<{ what: string; failure: Failure 
   );
 }
 
+/** The api's limit on a question, in characters (`docs/reference/http-api.md`). */
+const QUESTION_MAX_CHARS = 4000;
+/** What the api calls a conversation until its first question names it. */
+const UNTITLED = 'New conversation';
+/** The longest conversation title, in UTF-16 units (the api's column). */
+const TITLE_MAX_UNITS = 200;
+
+let localCounter = 0;
+const localId = () => `local-${++localCounter}`;
+
+/** A citation list with one entry per path, in order. */
+function uniqueByPath(citations: readonly Citation[]): Citation[] {
+  const byPath = new Map<string, Citation>();
+  for (const c of citations) if (!byPath.has(c.path)) byPath.set(c.path, c);
+  return [...byPath.values()];
+}
+
+/** The title the api gives an untitled conversation: its first question, flattened, at most 200 units. */
+function titleFrom(question: string): string {
+  let title = '';
+  for (const ch of question.replace(/\s+/g, ' ').trim()) {
+    if (title.length + ch.length > TITLE_MAX_UNITS) break;
+    title += ch;
+  }
+  return title;
+}
+
 /** A stored message as the thread renders it; its citations keep their titles, one per path. */
 function toChatMessage(m: ConversationMessage): ChatMessage {
-  const byPath = new Map<string, Citation>();
-  for (const c of m.citations ?? []) if (!byPath.has(c.path)) byPath.set(c.path, c);
-  const sources = [...byPath.values()];
+  const sources = uniqueByPath(m.citations ?? []);
   return { id: m.id, role: m.role, text: m.content, ...(sources.length ? { sources } : {}) };
 }
 
@@ -54,7 +80,13 @@ function toChatMessage(m: ConversationMessage): ChatMessage {
  * - **Latest click wins.** Opening a conversation while another is still loading ignores the
  *   slower answer, so the thread never shows a conversation that is not the selected one.
  * - **Narrow screens.** Below 768 px the list is a drawer opened by the *Conversations* button.
- * - **Sending** a message is added in web 3.3; until then the input only says so.
+ * - **Sending.** The question joins the thread at once and streams its answer in
+ *   (`/api/v1/conversations/{id}/ask/stream`); with no conversation open, one is created first.
+ *   While it streams the input is disabled. On `done` the conversation moves to the top of the list
+ *   (an untitled one takes the question as its title). On a failure the answer placeholder goes
+ *   and the question shows the error code and trace id with a **Retry** button (the api keeps the
+ *   question it was asked, so a retry shows it twice when the conversation is reopened). Opening
+ *   another conversation, or starting a new chat, ends the stream — nothing it sends is applied.
  */
 export function ChatWorkspace() {
   const [items, setItems] = useState<ConversationListItem[]>([]);
@@ -65,13 +97,18 @@ export function ChatWorkspace() {
   const [creating, setCreating] = useState(false);
   const [createFailure, setCreateFailure] = useState<Failure | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Bumped by every open/new-chat; a response is applied only if it still holds the latest value.
   const threadRef = useRef<HTMLElement>(null);
   const openSeq = useRef(0);
   const openAbort = useRef<AbortController | null>(null);
+  // Same idea for an answer in flight: bumped to ignore it, aborted to stop it.
+  const sendSeq = useRef(0);
+  const streamAbort = useRef<AbortController | null>(null);
+  // Set when an answer ends, so the input takes focus once it is enabled again (not before).
+  const refocusInput = useRef(false);
 
   // Load (or retry) the list after mount.
   useEffect(() => {
@@ -92,40 +129,64 @@ export function ChatWorkspace() {
     return () => controller.abort();
   }, [reloadKey]);
 
-  // Leaving the page cancels an open in flight.
-  useEffect(() => () => openAbort.current?.abort(), []);
+  // Leaving the page cancels an open and an answer in flight.
+  useEffect(
+    () => () => {
+      openAbort.current?.abort();
+      streamAbort.current?.abort();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!streaming && refocusInput.current) {
+      refocusInput.current = false;
+      inputRef.current?.focus();
+    }
+  }, [streaming]);
+
+  /** End the answer in flight, if any: its late frames are ignored and the api call is cancelled. */
+  const stopStream = useCallback(() => {
+    sendSeq.current++;
+    streamAbort.current?.abort();
+    streamAbort.current = null;
+    setStreaming(false);
+  }, []);
 
   const retryList = useCallback(() => {
     setList({ status: 'loading' });
     setReloadKey((k) => k + 1);
   }, []);
 
-  const openConversation = useCallback((id: string) => {
-    const seq = ++openSeq.current;
-    openAbort.current?.abort();
-    const controller = new AbortController();
-    openAbort.current = controller;
+  const openConversation = useCallback(
+    (id: string) => {
+      const seq = ++openSeq.current;
+      stopStream();
+      openAbort.current?.abort();
+      const controller = new AbortController();
+      openAbort.current = controller;
 
-    setSelectedId(id);
-    setThread({ status: 'loading' });
-    setNotice(null);
-    setCreateFailure(null);
-    setDrawerOpen(false);
-    // The row that had focus may be inside the drawer that just closed; keep the keyboard user here.
-    threadRef.current?.focus();
-    void getConversation(id, { signal: controller.signal }).then((result) => {
-      if (seq !== openSeq.current) return;
-      if (!result.ok) {
-        setThread({ status: 'error', error: result.error, traceId: result.traceId });
-        return;
-      }
-      setThread({
-        status: 'ready',
-        messages: result.data.messages.map(toChatMessage),
-        truncated: result.data.truncated,
+      setSelectedId(id);
+      setThread({ status: 'loading' });
+      setCreateFailure(null);
+      setDrawerOpen(false);
+      // The row that had focus may be inside the drawer that just closed; keep the keyboard user here.
+      threadRef.current?.focus();
+      void getConversation(id, { signal: controller.signal }).then((result) => {
+        if (seq !== openSeq.current) return;
+        if (!result.ok) {
+          setThread({ status: 'error', error: result.error, traceId: result.traceId });
+          return;
+        }
+        setThread({
+          status: 'ready',
+          messages: result.data.messages.map(toChatMessage),
+          truncated: result.data.truncated,
+        });
       });
-    });
-  }, []);
+    },
+    [stopStream],
+  );
 
   const newChat = useCallback(async () => {
     if (creating) return;
@@ -144,14 +205,130 @@ export function ChatWorkspace() {
     // chat is in the list, just not selected.
     if (openSeq.current !== startedAt) return;
     openSeq.current++;
+    stopStream();
     openAbort.current?.abort();
     setSelectedId(id);
     setThread({ status: 'ready', messages: [], truncated: false });
-    setNotice(null);
     setDrawerOpen(false);
     // The textarea is enabled in every state, so it can take focus now.
     inputRef.current?.focus();
-  }, [creating]);
+  }, [creating, stopStream]);
+
+  const send = useCallback(
+    async (question: string) => {
+      // The ref, not the state: two submits in one tick must not both get through.
+      if (streamAbort.current) return;
+      const seq = ++sendSeq.current;
+      const controller = new AbortController();
+      streamAbort.current = controller;
+      setStreaming(true);
+
+      const userMessage: ChatMessage = { id: localId(), role: 'user', text: question };
+      const assistantId = localId();
+      const current = () => sendSeq.current === seq;
+      const patch = (change: (messages: ChatMessage[]) => ChatMessage[]) => {
+        if (!current()) return;
+        setThread((prev) =>
+          prev.status === 'ready' ? { ...prev, messages: change(prev.messages) } : prev,
+        );
+      };
+      const patchAssistant = (change: (m: ChatMessage) => ChatMessage) =>
+        patch((messages) => messages.map((m) => (m.id === assistantId ? change(m) : m)));
+      /** The answer failed: drop its placeholder and put the error under the question. */
+      const fail = (error: ChatError) =>
+        patch((messages) =>
+          messages
+            .filter((m) => m.id !== assistantId)
+            .map((m) => (m.id === userMessage.id ? { ...m, error } : m)),
+        );
+      const finish = () => {
+        if (!current()) return;
+        streamAbort.current = null;
+        setStreaming(false);
+        refocusInput.current = true;
+      };
+
+      // The question shows at once, with an answer on its way.
+      const pending: ChatMessage = { id: assistantId, role: 'assistant', text: '', pending: true };
+      // With no conversation open the thread belongs to none: what it shows (a question that failed
+      // before a chat could be created) is not carried into the new one.
+      const keep = (prev: ThreadState): prev is Extract<ThreadState, { status: 'ready' }> =>
+        prev.status === 'ready' && selectedId !== null;
+      setThread((prev) => ({
+        status: 'ready',
+        messages: [...(keep(prev) ? prev.messages : []), userMessage, pending],
+        truncated: keep(prev) ? prev.truncated : false,
+      }));
+
+      let id = selectedId;
+      if (id === null) {
+        const created = await createConversation(undefined, { signal: controller.signal });
+        // A chat that was created is kept in the list even if the person went elsewhere meanwhile.
+        if (created.ok) {
+          const chat = created.data;
+          setItems((cur) => [
+            { id: chat.id, title: chat.title, updated_at: chat.updated_at },
+            ...cur.filter((i) => i.id !== chat.id),
+          ]);
+        }
+        if (!current()) return;
+        if (!created.ok) {
+          fail({ kind: created.error, ...(created.traceId ? { traceId: created.traceId } : {}) });
+          finish();
+          return;
+        }
+        const chat = created.data;
+        id = chat.id;
+        openSeq.current++; // an open still in flight must not replace this thread
+        openAbort.current?.abort();
+        setSelectedId(chat.id);
+      }
+
+      const conversationId = id;
+      await askStream(
+        `/api/v1/conversations/${encodeURIComponent(conversationId)}/ask/stream`,
+        question,
+        {
+          onSources: (sources) => patchAssistant((m) => ({ ...m, sources })),
+          onToken: (text) => patchAssistant((m) => ({ ...m, text: m.text + text })),
+          // The early list is every retrieved document; `done` says which ones the answer cites.
+          onDone: ({ citations }) => {
+            const cited = uniqueByPath(citations);
+            patchAssistant(({ sources: _early, ...rest }) => ({
+              ...rest,
+              pending: false,
+              ...(cited.length ? { sources: cited } : {}),
+            }));
+            if (!current()) return;
+            const updatedAt = new Date().toISOString();
+            setItems((cur) => {
+              const known = cur.find((i) => i.id === conversationId);
+              const title = known && known.title !== UNTITLED ? known.title : titleFrom(question);
+              const moved = { id: conversationId, title, updated_at: updatedAt };
+              return [moved, ...cur.filter((i) => i.id !== conversationId)];
+            });
+          },
+          onError: ({ kind, traceId }) => fail({ kind, ...(traceId ? { traceId } : {}) }),
+        },
+        { signal: controller.signal },
+      );
+      finish();
+    },
+    [selectedId],
+  );
+
+  const retry = useCallback(
+    (message: ChatMessage) => {
+      if (streamAbort.current) return;
+      setThread((prev) =>
+        prev.status === 'ready'
+          ? { ...prev, messages: prev.messages.filter((m) => m.id !== message.id) }
+          : prev,
+      );
+      void send(message.text);
+    },
+    [send],
+  );
 
   const listPanel = (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -234,20 +411,17 @@ export function ChatWorkspace() {
                   Showing the most recent 500 messages.
                 </p>
               )}
-              <ChatThread messages={thread.messages} />
+              <ChatThread messages={thread.messages} onRetry={retry} />
             </div>
           )}
         </div>
 
-        {notice && (
-          <p role="status" className="text-sm text-neutral-700 dark:text-neutral-300">
-            {notice}
-          </p>
-        )}
         <MessageInput
           textareaRef={inputRef}
-          keepText
-          onSubmit={() => setNotice('Sending messages is not available yet.')}
+          maxChars={QUESTION_MAX_CHARS}
+          // Not while an answer streams, nor while the thread it would join is loading or failed.
+          disabled={streaming || thread.status === 'loading' || thread.status === 'error'}
+          onSubmit={(question) => void send(question)}
         />
       </section>
     </div>

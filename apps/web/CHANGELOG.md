@@ -7,6 +7,39 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-07
+
+### Added
+
+- **Sending a question from `/chat`** (web roadmap 3.3, `ChatWorkspace`): **Send** posts the question to
+  `/api/v1/conversations/{id}/ask/stream`. The question shows in the thread at once; the input is disabled while the
+  answer streams; tokens appear as they arrive and the Sources block appears with the `sources` frame, then is replaced by
+  the documents the answer cites when `done` arrives (none → no block). The conversation moves to the top of the list on
+  `done`, and an untitled one takes the question as its title (flattened, at most 200 characters), as the api does.
+  With no conversation open, one is created first.
+  - **A failure** (an `error` frame, a refused request, a broken stream, a conversation that could not be created) removes
+    the answer placeholder and shows the error code and trace id under the question, with a **Retry** button; the input
+    works again. The api keeps a question it was asked, so a retry shows it twice when the conversation is reopened.
+  - Opening another conversation, starting a new chat or leaving the page **ends the stream** (the api call is
+    cancelled, which frees its concurrency slot) and nothing it sends later is applied.
+- **A counter and a limit on the input** (`MessageInput`, prop `maxChars`): "0 / 4,000", counted in characters (code
+  points, trimmed) like the api; an empty question or one over the limit cannot be sent, and nothing typed is lost.
+- **`ChatThread` takes `onRetry`**: a failed question shows **Retry**.
+
+### Changed
+
+- **Screen readers hear the finished answer, not every token**: only the newest message in `ChatThread` is a live region,
+  and it is `aria-busy` while it streams (the whole list used to be one).
+- The mock ask routes accept the conversation a new chat creates, so "new chat, then ask" works with
+  `MOCK_UPSTREAM=true`.
+- `MessageInput`'s `keepText` prop is gone (it only served the placeholder that said sending was not available).
+
+### Known limits
+
+- The `ChatPanel` (template demo) is unchanged and has no Retry or counter; web 4.1 removes it.
+- The list's order and title after an answer are updated locally; they are re-read from the api the next time the page
+  loads.
+
 ## [0.5.0] — 2026-10-07
 
 ### Added

@@ -7,7 +7,7 @@ import { proxyStream, streamUpstream } from '@/lib/stream';
 import {
   conversationAskFailureFrames,
   conversationAskStreamFrames,
-  findConversationFixture,
+  mockConversationExists,
 } from '@/mocks/conversations';
 
 export const dynamic = 'force-dynamic';
@@ -35,7 +35,7 @@ export async function POST(
       log('info', 'bff inbound', { route: ROUTE, method: 'POST' });
 
       if (isMockUpstream()) {
-        if (!findConversationFixture(id.toLowerCase())) {
+        if (!mockConversationExists(id.toLowerCase())) {
           return mockJson({ error: 'not_found', trace_id: traceId }, traceId, 404);
         }
         const failing = new URL(req.url).searchParams.get('mock') === 'failure';

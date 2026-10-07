@@ -52,8 +52,14 @@ URL.
   beside it, as **plain text** (they are untrusted indexed text: no markup, no links), not numbered (the `[n]` in an answer
   are passage numbers, not list positions); nothing is drawn when there are none.
   `ChatWorkspace` is the `/chat` page body: it owns the state and fetches (list after mount, open a
-  conversation — latest click wins —, **+ New chat**, a drawer for the list below 768 px) and sends
-  nothing yet (web 3.3). `MessageInput` takes an optional `textareaRef` (focus) and `keepText`; `ConversationList` takes `showEmpty`.
+  conversation — latest click wins —, **+ New chat**, a drawer for the list below 768 px) and **sends**: the question joins
+  the thread at once, the answer streams in via `askStream` (`/api/v1/conversations/{id}/ask/stream`; no conversation open →
+  one is created first), the input is disabled meanwhile, `done` moves the conversation to the top of the list (an untitled
+  one takes the question as its title), a failure shows the code + trace id under the question with **Retry**. `stopStream`
+  (a `sendSeq` counter + an `AbortController`) ends the answer when another conversation is opened, a new chat is started
+  or the page is left; its late frames are ignored. `MessageInput` takes an optional `textareaRef` (focus) and `maxChars`
+  (a "n / max" counter in code points; over the limit nothing is sent); `ChatThread` takes `onRetry` and makes only its
+  newest message a live region (`aria-busy` while streaming); `ConversationList` takes `showEmpty`.
   `ConversationList` is the chat page's sidebar: a **+ New chat** button and one `<button>` row per conversation
   (title + `formatRelativeTime` from `src/lib/relative-time.ts`: "today 10:12" / "yesterday" / "5 Oct"), the open row marked
   `aria-current="true"`, long titles truncated, "No chats yet" when empty. Presentational: `onSelect(id)` / `onNewChat()`
