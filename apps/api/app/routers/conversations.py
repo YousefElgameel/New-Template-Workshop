@@ -100,8 +100,10 @@ class ConversationDetail(ConversationOut):
     messages: list[MessageOut] = Field(description="Oldest first, ordered by thread position.")
     truncated: bool = Field(
         description=(
-            f"True when the conversation holds more than {repo.MAX_THREAD_MESSAGES} messages and "
-            "only the most recent ones are returned."
+            f"True when only the most recent messages are returned: the conversation holds more "
+            f"than {repo.MAX_THREAD_MESSAGES} messages, or they add up to more than about "
+            f"{repo.MAX_THREAD_BYTES // (1024 * 1024)} MiB of text (UTF-8 bytes of content and "
+            f"citations); the newest message is always returned."
         )
     )
 
@@ -142,9 +144,12 @@ async def list_conversations(
     summary="Open a conversation with its messages",
 )
 async def get_conversation(conversation_id: UUID, session: DbSession) -> ConversationDetail:
-    # The cap is passed explicitly: a default argument would be frozen when the module loads.
+    # The caps are passed explicitly: a default argument would be frozen when the module loads.
     thread = await repo.get_conversation_with_messages(
-        session, conversation_id, limit=repo.MAX_THREAD_MESSAGES
+        session,
+        conversation_id,
+        limit=repo.MAX_THREAD_MESSAGES,
+        max_bytes=repo.MAX_THREAD_BYTES,
     )
     if thread is None:
         raise NotFound()

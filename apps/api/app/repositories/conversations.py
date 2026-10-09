@@ -7,10 +7,11 @@ and message text are user content and must never reach logs, spans or metrics.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol
 from uuid import UUID
 
 from sqlalchemy import select
@@ -32,6 +33,12 @@ DEFAULT_LIST_LIMIT = 50
 MAX_HISTORY_LIMIT = 100
 # Most messages one read of a conversation returns (the most recent ones; see `Thread`).
 MAX_THREAD_MESSAGES = 500
+# About how many bytes of message text one read of a conversation returns (api 5.4). The web BFF
+# refuses an upstream body over 8 MiB, and 500 messages of 4,000 four-byte characters with long
+# citation titles can reach about 10 MB; this keeps the answer well under that.
+MAX_THREAD_BYTES = 4 * 1024 * 1024
+# What a message costs on the wire besides its text: ids, role, timestamp and the JSON keys.
+MESSAGE_OVERHEAD_BYTES = 256
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -43,6 +50,26 @@ class ConversationNotFound(LookupError):
 def utf16_length(text: str) -> int:
     """Length in UTF-16 code units — how SQL Server measures ``NVARCHAR(n)`` (an emoji is 2)."""
     return len(text.encode("utf-16-le")) // 2
+
+
+class _HasText(Protocol):
+    """What the byte count reads from a message: its text and its citations."""
+
+    content: str
+    citations: Any
+
+
+def message_wire_bytes(message: _HasText) -> int:
+    """About how many bytes a message takes in the response: the UTF-8 length of its content and
+    citations as JSON (quotes and control characters are escaped, so they count double) plus a
+    fixed allowance for the rest. Measured on bytes, not characters: an emoji is 4 bytes. It never
+    counts fewer bytes than the response holds (the allowance is more than the ~150 bytes of ids,
+    role, timestamp and keys). A lone surrogate counts 3 bytes here and still fails when the
+    response is written, as it did before: ask cleans them out on every write."""
+    text = json.dumps(
+        [message.content, message.citations], ensure_ascii=False, separators=(",", ":")
+    )
+    return len(text.encode("utf-8", "surrogatepass")) + MESSAGE_OVERHEAD_BYTES
 
 
 def _cut_utf16(text: str, max_units: int) -> str:
@@ -96,24 +123,35 @@ async def get_conversation(session: AsyncSession, conversation_id: UUID) -> Conv
 
 
 class Thread(NamedTuple):
-    """A conversation with (at most ``MAX_THREAD_MESSAGES`` of) its messages, oldest first."""
+    """A conversation with (at most ``MAX_THREAD_MESSAGES`` / ``MAX_THREAD_BYTES`` of) its messages,
+    oldest first."""
 
     conversation: Conversation
     messages: Sequence[Message]
-    truncated: bool  # True when older messages were left out
+    truncated: bool  # True when older messages were left out (by count or by bytes)
 
 
 async def get_conversation_with_messages(
-    session: AsyncSession, conversation_id: UUID, limit: int = MAX_THREAD_MESSAGES
+    session: AsyncSession,
+    conversation_id: UUID,
+    limit: int = MAX_THREAD_MESSAGES,
+    max_bytes: int = MAX_THREAD_BYTES,
 ) -> Thread | None:
-    """The conversation and its thread, ordered by ``seq`` (decision 12), bounded.
+    """The conversation and its thread, ordered by ``seq`` (decision 12), bounded twice.
 
     A conversation can grow without limit (no purge job, decision 5), so a read never returns more
-    than ``limit`` messages: the MOST RECENT ones, oldest first, with ``truncated`` set when older
-    ones were left out. One extra row is fetched to know that without a second query.
+    than ``limit`` messages, nor about more than ``max_bytes`` bytes of them: the MOST RECENT ones,
+    oldest first, with ``truncated`` set when older ones were left out. One extra row is fetched to
+    know about the count without a second query; the byte bound is worked out on the rows already
+    read, newest first, so it reads nothing more. The newest message is always returned, even over
+    ``max_bytes`` (an empty thread would be worse): the bound is hard only because a message is
+    capped on write (4,000 characters, ``ask.py``); a longer one stored by other means is returned
+    whole.
     """
     if limit < 1:
         raise ValueError("limit must be at least 1")
+    if max_bytes < 1:
+        raise ValueError("max_bytes must be at least 1")
     conversation = await session.get(Conversation, conversation_id)
     if conversation is None:
         return None
@@ -125,7 +163,16 @@ async def get_conversation_with_messages(
     )
     newest_first = list(result.scalars().all())
     truncated = len(newest_first) > limit
-    return Thread(conversation, list(reversed(newest_first[:limit])), truncated)
+    kept: list[Message] = []
+    used = 0
+    for message in newest_first[:limit]:
+        size = message_wire_bytes(message)
+        if kept and used + size > max_bytes:
+            truncated = True
+            break
+        kept.append(message)
+        used += size
+    return Thread(conversation, list(reversed(kept)), truncated)
 
 
 async def get_recent_messages(

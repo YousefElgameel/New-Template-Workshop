@@ -220,7 +220,7 @@ export interface components {
       title: string;
       /**
        * Truncated
-       * @description True when the conversation holds more than 500 messages and only the most recent ones are returned.
+       * @description True when only the most recent messages are returned: the conversation holds more than 500 messages, or they add up to more than about 4 MiB of text (UTF-8 bytes of content and citations); the newest message is always returned.
        */
       truncated: boolean;
       /**

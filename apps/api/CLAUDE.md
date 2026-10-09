@@ -15,7 +15,7 @@ this as a starting map; read the actual files when you need detail.
   awaits `dispose_engine()` on shutdown.
 - `routers/conversations.py` — `/v1/conversations`: `POST` start, `GET` list, `GET /{id}` open (schemas live in
   the module; the endpoint owns the unit of work — it commits the one write, the repository never does; a read
-  returns at most 500 messages and flags `truncated`). Log counts only: no ids, titles or message text; the request span's URL attributes are scrubbed of UUIDs by
+  returns at most 500 messages and about 4 MiB of message text (UTF-8 bytes of content + citations as JSON, `MAX_THREAD_BYTES`), the most recent ones, and flags `truncated`). Log counts only: no ids, titles or message text; the request span's URL attributes are scrubbed of UUIDs by
   `scrub_ids_server_hook`. Titles are measured in UTF-16 units (the column's unit). Cap request bodies at the
   ingress or BFF — the api reads the whole body before validating it.
 - `routers/v1.py` — the **mandatory `/v1` business router** (`v1_router`, `prefix="/v1"`); feature

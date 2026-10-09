@@ -175,8 +175,12 @@ not an integer. There is no cursor yet (decision 15): page by lowering the limit
 }
 ```
 
-A read never returns more than **500** messages: when a conversation holds more, only the most recent 500 are
-returned (still oldest first) and `truncated` is `true`. `404 not_found` for an unknown id; `422` for an id that
+A read is bounded twice: it never returns more than **500** messages, nor more than about **4 MiB** of message
+text (the UTF-8 bytes of each message's content and citations as JSON, plus a fixed 256 bytes for the rest of it).
+When a conversation holds more of either, only the most recent messages that fit are returned (still oldest
+first, always at least the newest one) and `truncated` is `true`; a thread of 500 emoji-only messages with long
+citation titles, about 10 MB, comes back as the newest ~190 under the BFF's 8 MiB limit. The bytes are
+worked out on the rows the one query already read (500 plus one), so a read costs no more than before. `404 not_found` for an unknown id; `422` for an id that
 is not a UUID.
 
 ### `POST /v1/conversations/{id}/ask` — ask a question
@@ -216,9 +220,9 @@ Source: `apps/api/app/routers/ask.py` (roadmap api 4.2). The answer is written f
 
 - **Text cleaning** — in the question and in the stored answer, NUL and lone surrogates are dropped and every
   other control character except tab, newline and carriage return becomes a space (a control character costs 6
-  bytes as a JSON escape). So no stored character costs more than 4 bytes in a thread read, and ordinary
-  500-message threads fit the BFF's 8 MiB. A thread of maximum-length emoji-only messages with very long
-  citation titles can still exceed it; bounding a thread read by bytes is api roadmap 5.4.
+  bytes as a JSON escape). So no stored character costs more than 4 bytes in a thread read. A thread read is also bounded by bytes (about 4 MiB, see
+  `GET /v1/conversations/{id}`), so a thread of messages written through the api cannot exceed the BFF's 8 MiB
+  (the newest message is always returned, and a question or an answer is capped at 4,000 characters).
 - **Replayed history** is cut to 4,000 characters per message.
 
 | Situation                                                                        | Status | `error`             |

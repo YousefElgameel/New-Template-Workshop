@@ -531,7 +531,7 @@ need a human with access._
 
 ### 5.4 — Bound a thread read by bytes
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [4.2]
 - **layers:** [endpoint]
 - **acceptance:**
@@ -540,11 +540,22 @@ need a human with access._
   - tests build a thread of 500 maximum-length emoji messages with long citation titles and prove the response stays under the bound; the BFF's 8 MiB response limit is never reached
   - `docs/reference/http-api.md` and OpenAPI describe the byte bound next to the 500-message bound
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `uv run --directory apps/api pytest` — expect **1052 passed, 5 skipped** (new: `tests/test_conversation_thread_bytes.py`, 31 tests; the repository tests that used plain strings as rows now use message-like rows); `ruff format --check` and `ruff check` clean; `docs/reference/openapi.json` current (`tests/test_openapi_export.py`) and `pnpm -C apps/web typecheck` clean with the regenerated `api-types.ts`
+  - **the worst thread, as the response is written:** `uv run --directory apps/api pytest tests/test_conversation_thread_bytes.py -k worst -v` — 501 rows of 4,000 emoji with five 200-emoji citation titles each (about 11 MB if returned whole) come back as about 190 messages, `truncated: true`, and `len(response.content)` is between 90 % and 100 % of 4 MiB, far under the BFF's 8 MiB
+  - **the count never understates:** `TestTheCountNeverUnderstates` compares the count with the bytes `MessageOut` really writes for quotes, backslashes, tabs and newlines, NUL, other control characters, U+2028, accents and emoji — never below, never more than 200 bytes above
+  - **with a real database (optional):** in the dev database store a thread of long emoji answers (an ordinary ask cannot — answers are capped at 4,000 characters, which is the point), open it with `curl -s localhost:8000/v1/conversations/<id> | python -c "import sys; print(len(sys.stdin.buffer.read()))"` → under 4,194,304 and `"truncated": true`
+  - prove the tests bite: in `app/repositories/conversations.py` count characters instead of bytes, use `ensure_ascii=True`, drop the citations or the 256-byte allowance, make the bound `>=`, stop guaranteeing the newest message, skip the `truncated` flag, `continue` instead of `break`, drop the count slice, keep the oldest instead of the newest, or double the bound; in the router stop passing `max_bytes`; in OpenAPI drop the byte wording: the matching tests fail (15 such changes tried; one survived — skipping a message that does not fit instead of stopping — and a mixed-size test now catches it)
 - **needs_human:**
-  - none
+  - the web app still says "Showing the most recent 500 messages." (`apps/web/src/components/chat/ChatWorkspace.tsx`) whatever cut the thread; a byte-cut thread shows about 190. It is the web layer's text (and its test, `ChatWorkspace.test.tsx`, and a comment in `mocks/conversations.test.ts` and `lib/conversations-bff.ts`), so I did not change it here — say "web chore" and I will reword it to "Showing only the most recent messages." with a web patch release, or add it to the web roadmap
+  - nothing else
 - **notes:**
   - 2026-10-07 — planned from the api 4.2 reviews: a per-message cap (4,000 characters, 4 bytes each) cannot guarantee that 500 messages fit the BFF's 8 MiB limit; ordinary threads do, but a thread of emoji-only messages with 200-character titles can reach about 10 MB, after which the BFF returns an upstream error and the conversation cannot be opened. Changes the api 2.1 endpoint, hence a separate item.
+  - 2026-10-09 — started by Claude.
+  - 2026-10-09 — implemented by Claude, awaiting test by Yousef Wahid. Files: `app/repositories/conversations.py` (`MAX_THREAD_BYTES`, `MESSAGE_OVERHEAD_BYTES`, `message_wire_bytes`, the loop in `get_conversation_with_messages`), `app/routers/conversations.py` (passes both caps; the `truncated` description), `tests/test_conversation_thread_bytes.py` (new), `tests/test_repositories_conversations.py`, stale comments in `app/routers/ask.py` and `tests/test_ask_api.py`, the regenerated `docs/reference/openapi.json` + `apps/web/src/lib/api-types.ts` (a description only), `docs/reference/http-api.md`, the threat model (I1), `apps/api/CLAUDE.md`, `CHANGELOG.md` + `pyproject.toml`/`uv.lock` (0.15.0). Reviews: `code-reviewer` and `security-reviewer`; no CRITICAL or HIGH.
+  - 2026-10-09 — fixed after review: the count is tested never to fall below what the response holds (control characters, NUL, escapes, U+2028); the byte cut stops at the first message that does not fit (no gap); the endpoint order test checks the order; stale comments that called 5.4 future work; docs said "the newest few hundred" (it is about 190) and "no thread can exceed 8 MiB" without the caveat that the newest message is always returned and a message is capped at 4,000 characters on write.
+  - 2026-10-09 — DECISIONS: the bound is on the JSON the response writes (escapes count) plus a fixed 256 bytes a message, not on characters; the newest message is always returned even over the bound, so a thread is never empty (the bound holds because writes are capped); the byte check runs on the 501 rows the query already reads, so no extra query or row; version 0.15.0 (MINOR: `truncated` now also means cut by bytes, no field changed).
+  - 2026-10-09 — not done, recorded: (1) a stored message that is itself over 8 MiB (written by other means; threat model G2) is still returned whole and the BFF turns that into a 502; capping content on write closes it; (2) a stored `citations` value of the wrong shape still makes the read a clean 500 (pre-existing, only the ask path writes); (3) the rows are still all read from the database before the cut, so the bound saves bytes on the wire and CPU, not database transfer; (4) the web notice wording (above).
+  - 2026-10-09 — confirmed by Yousef Wahid.
 
 ### 5.5 — Request-size cap in the api
 

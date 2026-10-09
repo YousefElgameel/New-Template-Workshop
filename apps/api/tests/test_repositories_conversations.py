@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 from itertools import count
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -71,6 +72,15 @@ def _sql(statement: Any) -> str:
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def _row(name: str) -> Any:
+    """A stand-in for a ``Message`` row: the repository only reads its text."""
+    return SimpleNamespace(content=name, citations=None)
+
+
+def _names(messages: Any) -> list[str]:
+    return [m.content for m in messages]
 
 
 def _existing(session: FakeSession, title: str = DEFAULT_CONVERSATION_TITLE) -> Conversation:
@@ -142,12 +152,12 @@ def test_get_conversation_returns_none_for_an_unknown_id() -> None:
 
 def test_get_with_messages_returns_the_thread_oldest_first() -> None:
     # The query is newest-first (DESC + LIMIT, so it can be bounded); the repository flips it.
-    session = FakeSession(rows=["m2", "m1"])
+    session = FakeSession(rows=[_row("m2"), _row("m1")])
     conversation = _existing(session)
     found = run(repo.get_conversation_with_messages(session, conversation.id))
     assert found is not None
     assert found.conversation is conversation
-    assert found.messages == ["m1", "m2"] and found.truncated is False
+    assert _names(found.messages) == ["m1", "m2"] and found.truncated is False
     sql = _sql(session.statements[0])
     assert "ORDER BY messages.seq DESC" in sql and "messages.conversation_id" in sql
     literal = str(
@@ -159,18 +169,21 @@ def test_get_with_messages_returns_the_thread_oldest_first() -> None:
 
 
 def test_get_with_messages_is_bounded_and_says_when_it_cut() -> None:
-    session = FakeSession(rows=["m5", "m4", "m3", "m2"])  # limit + 1 rows came back
+    session = FakeSession(
+        rows=[_row("m5"), _row("m4"), _row("m3"), _row("m2")]
+    )  # limit + 1 rows came back
     conversation = _existing(session)
     found = run(repo.get_conversation_with_messages(session, conversation.id, limit=3))
     assert found is not None and found.truncated is True
-    assert found.messages == ["m3", "m4", "m5"]  # the 3 newest, oldest first
+    assert _names(found.messages) == ["m3", "m4", "m5"]  # the 3 newest, oldest first
 
 
 def test_get_with_messages_exactly_at_the_limit_is_not_truncated() -> None:
-    session = FakeSession(rows=["m3", "m2", "m1"])
+    session = FakeSession(rows=[_row("m3"), _row("m2"), _row("m1")])
     conversation = _existing(session)
     found = run(repo.get_conversation_with_messages(session, conversation.id, limit=3))
-    assert found is not None and found.truncated is False and found.messages == ["m1", "m2", "m3"]
+    assert found is not None and found.truncated is False
+    assert _names(found.messages) == ["m1", "m2", "m3"]
 
 
 @pytest.mark.parametrize("limit", [0, -5])

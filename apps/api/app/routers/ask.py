@@ -65,8 +65,8 @@ MAX_QUESTION_CHARS = 4_000
 # A stored answer is cut here, at the same length as a question. Together with `clean_text`
 # (control characters other than tab/newline/CR would cost 6 bytes each as JSON escapes) no
 # stored character costs more than 4 bytes in a thread read, so ordinary threads of 500
-# messages fit the BFF's 8 MiB. A thread of maximum-length emoji-only messages with long
-# citation titles can still exceed it — bounding a thread read by bytes is api roadmap 5.4.
+# messages fit the BFF's 8 MiB; a thread read is also bounded by bytes (about 4 MiB, api 5.4), so
+# even a thread of maximum-length emoji-only messages with long citation titles does.
 MAX_ANSWER_CHARS = 4_000
 _ELLIPSIS = "…"
 

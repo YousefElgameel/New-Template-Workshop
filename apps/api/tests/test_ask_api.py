@@ -543,7 +543,7 @@ class TestTextCleaning:
     def test_an_ordinary_full_thread_fits_the_bff_limit(self) -> None:
         # 500 messages of full-length ASCII text with three citations on every answer — what the api
         # actually produces day to day. (A thread of maximum-length emoji-only messages with long
-        # titles can still exceed 8 MiB: bounding a thread read by bytes is api roadmap 5.4.)
+        # titles is cut by the byte bound instead: tests/test_conversation_thread_bytes.py.)
         moment = datetime.fromisoformat("2026-10-06T10:00:00")
         citations = [Citation(title="T" * 60, path="docs/" + "p" * 60 + ".md")] * 3
         messages = [

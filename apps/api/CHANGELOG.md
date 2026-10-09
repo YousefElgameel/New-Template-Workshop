@@ -7,6 +7,28 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-09
+
+### Changed
+
+- **`GET /v1/conversations/{id}` is bounded by bytes as well as by count** (roadmap api 5.4). It still returns at most
+  500 messages, and now also at most about **4 MiB** of message text: the UTF-8 length of each message's content and
+  citations as JSON (a quote or a control character counts as its escape; an emoji as 4 bytes) plus a fixed 256 bytes
+  for its other fields. When the 500 most recent messages are larger, it returns the most recent ones that fit (oldest
+  first, always at least the newest) and `truncated` is `true`. Before, 500 messages of 4,000 emoji with long citation
+  titles were about 10 MB, over the web BFF's 8 MiB limit, and such a conversation could not be opened at all.
+  - The byte count is made on the rows the single query already reads (500 plus one): no extra query, no extra row.
+  - `truncated` now also means "cut by bytes"; its OpenAPI description says so, and the contract and the web's generated
+    types are regenerated. No field was added or removed, so the change is backward compatible (MINOR).
+  - The newest message is always returned, even over the bound (an empty thread would be worse); a message is capped
+    at 4,000 characters on write, so through the api the bound holds. A message stored by other means that is itself over
+    8 MiB is still returned whole (the write-size gap G2 of the threat model).
+  - **Follow-up in the web app** (not part of this change): the chat page says "Showing the most recent 500 messages."
+    whatever cut the thread; with the byte bound it can be about 190. Its comment in `conversations-bff.ts` about the
+    8 MiB limit is now a backstop.
+  - Tests: `tests/test_conversation_thread_bytes.py` builds the worst thread (501 rows of 4,000 emoji with five 200-emoji
+    citation titles) and checks the repository result and the response **as written** stay under the bound.
+
 ## [0.14.0] — 2026-10-09
 
 ### Added
