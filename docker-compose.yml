@@ -84,6 +84,9 @@ services:
       TELEMETRY_AUTH_MODE: ${TELEMETRY_AUTH_MODE:-}
       # Upstream service for the BFF, via compose DNS (server-side only).
       API_BASE_URL: http://api:8000
+      ASK_MAX_INFLIGHT: ${ASK_MAX_INFLIGHT:-8}
+      ASK_MAX_INFLIGHT_PER_CLIENT: ${ASK_MAX_INFLIGHT_PER_CLIENT:-2}
+      ASK_TRUSTED_PROXY_HOPS: ${ASK_TRUSTED_PROXY_HOPS:-0}
     ports:
       - '3000:3000'
     depends_on:

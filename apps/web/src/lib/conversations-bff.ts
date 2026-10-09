@@ -38,10 +38,29 @@ function apiBase(): string {
   return process.env.API_BASE_URL ?? 'http://localhost:8000';
 }
 
-function reject(route: string, traceId: string, status: number, error: string): Response {
+function reject(
+  route: string,
+  traceId: string,
+  status: number,
+  error: string,
+  extra: { why?: 'instance' | 'client' } = {},
+): Response {
   // Bounded fields only: the pattern and the status. What was wrong is deliberately not echoed.
-  log('warn', 'bff rejected request', { route, status });
+  log('warn', 'bff rejected request', { route, status, ...extra });
   return Response.json({ error, trace_id: traceId }, { status });
+}
+
+/** `403` — a state-changing request that a browser sent on behalf of another site. */
+export function invalidOrigin(route: string, traceId: string): Response {
+  return reject(route, traceId, 403, 'invalid_origin');
+}
+
+/**
+ * `429 busy` — the api's own code and shape: this instance, or this client, already has as many asks
+ * in flight as allowed. `why` is `instance` or `client` (the log never carries an address).
+ */
+export function busy(route: string, traceId: string, why: 'instance' | 'client'): Response {
+  return reject(route, traceId, 429, 'busy', { why });
 }
 
 /** `400` — invalid input or an unreadable body. */

@@ -265,7 +265,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 3.4 — Limits on asks at the BFF
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [3.1]
 - **layers:** [bff]
 - **acceptance:**
@@ -274,11 +274,25 @@ conversation surface (decision 18) — the removal is item 4.1._
   - limits are configurable by server-side env vars with documented defaults (`ASK_MAX_INFLIGHT`, `ASK_MAX_INFLIGHT_PER_CLIENT`) in `.env.example` and `environment-variables.md`; the counters are never logged with an address (counts only)
   - tests for each limit and its release (normal end, error, abort), the address choice, the origin cases, and that a normal ask is unaffected; works against `MOCK_UPSTREAM=true`
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm test` in `apps/web` — expect **25 files, 649 tests** passed (new: `src/lib/ask-limits.test.ts`, `src/app/api/v1/conversations/ask-limits-routes.test.ts`); `pnpm typecheck` clean
+  - **the cap, against the real api** (optional, spends model tokens; a mocked answer ends too fast to hold a slot): in `apps/web/.env.local` set `ASK_MAX_INFLIGHT_PER_CLIENT=1`, run the api and `pnpm dev`, then start two asks at once from two terminals (`curl -N -X POST http://localhost:3000/api/v1/conversations/<id>/ask/stream -H 'content-type: application/json' -d '{"question":"hi"}'`) → the second is `429 {"error":"busy","trace_id":"0eb0…"}` with the same id in `x-trace-id`; when the first ends, a new ask is accepted. The tests cover the same with live streams and need no api
+  - **the origin check:** `curl -i -X POST http://localhost:3000/api/v1/conversations -H 'origin: https://evil.example'` → `403 {"error":"invalid_origin",…}`; the same with `-H 'sec-fetch-site: cross-site'` → `403`; with `-H 'origin: http://localhost:3000'` or no header → not refused
+  - **a normal ask is unaffected:** open http://localhost:3000/chat with the mocks on, ask a question → it streams as before
+  - **no address in the logs:** `pnpm dev` output for a refused ask shows `route`, `status` and `why: "client"` — never an IP
+  - prove the tests bite: in `ask-limits.ts` drop the instance or client check in `tryAcquire`, the `release()` in `releaseWhenDone`'s `cancel`, the backstop timer, the `hops` offset, the `/64` truncation, or the port/zone stripping; in the routes drop `checkOrigin` or `acquireAsk` or a `finally` release: the matching tests fail (35 such changes tried, all caught)
 - **needs_human:**
+  - **after the first deploy**, in a real browser on the deployed URL, send a question from `/chat`: it must not be refused `403 invalid_origin`. The check compares `Origin` with the `Host` header the container receives; if the ingress ever rewrote `Host`, every browser write would be refused (the app does not trust `x-forwarded-host`). I could not test through the real ingress from here
+  - tell me whether a Front Door or an application gateway will sit in front of the ingress: if so, set `ASK_TRUSTED_PROXY_HOPS` (1 for one such proxy) on the web container app, otherwise every client shares one address and the per-client cap of 2 limits everyone together
   - for the stronger control, ask the cloud team for **ingress IP restrictions** (an allow-list of the company networks) on the web container app — nothing in this repository can set it (platform tier, ADR-0012)
 - **notes:**
   - 2026-10-07 — planned from the proposed decisions of the threat model §8a (G1, G4): proposed by Claude on Yousef Wahid's instruction to decide. The numbers are defaults chosen here (the api allows 4 asks at once, so 8 per instance leaves room for one browser tab each and a retry); change them in the item if the team prefers other values.
+  - 2026-10-09 — started by Claude.
+  - 2026-10-09 — implemented by Claude, awaiting test by Yousef Wahid. Files: `src/lib/ask-limits.ts` (new: `AskLimiter`, `clientKeyOf`, `normaliseAddress`, `releaseWhenDone`, `isSameOriginRequest`), `ask-bff.ts` (`checkOrigin`, `acquireAsk`, `SLOT_HOLD_MS`), `conversations-bff.ts` (`invalidOrigin`, `busy`), the three write routes, two new test files, `.env.example`, `docker-compose.yml`, `environment-variables.md`, `http-api.md`, `apps/web/CLAUDE.md`, `CHANGELOG.md` + `package.json` (0.8.0). Reviews: `code-reviewer` and `security-reviewer`; no CRITICAL/HIGH.
+  - 2026-10-09 — fixed after review: a slot could leak if building the stream response threw (the flag that hands release to the stream is set after the Response exists); a reader that stops reading could hold a slot for as long as the ingress allows (backstop: `ASK_HOP_TIMEOUT_MS` + 5 s, then the slot is released and the api stream cancelled); the client key is normalised (`:port`, `%zone`, IPv4-mapped IPv6, IPv6 as its /64) so a form of the address is not a new client; the refusal is logged after the request log line; `reject`'s extra is typed. Tests added for the order of checks under saturation (a bad or foreign request is 400/403, never 429) and for the real cancel path.
+  - 2026-10-09 — DECISIONS: the per-client key is the entry `ASK_TRUSTED_PROXY_HOPS` places from the right (default 0); with fewer entries than that, or an entry that is not an address, the request goes to the shared bucket, never to an address further left; a slot is taken after validation, so a bad request never uses one.
+  - 2026-10-09 — not done, recorded: (1) one client can still hold the instance cap by rotating addresses across /64s — the ingress IP allow-list is the control for that; (2) the origin check does not defend against DNS rebinding with a forged `Host` and does not cover the `GET` routes — a follow-up could add an allowed-hosts list (`APP_ALLOWED_HOSTS`) checked on every route; (3) the refusal has no `Retry-After`; (4) the counts are per replica.
+  - 2026-10-09 — version 0.8.0 (MINOR: new refusals on the write routes, backward compatible for the page).
+  - 2026-10-09 — confirmed by Yousef Wahid.
 
 ### 3.5 — Shared-chats notice and security headers
 

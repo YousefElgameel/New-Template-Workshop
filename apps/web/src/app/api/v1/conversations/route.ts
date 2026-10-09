@@ -1,6 +1,7 @@
 import { withBff } from '@/lib/trace';
 import { log } from '@/lib/logger';
 import { isMockUpstream, mockJson } from '@/lib/mocks';
+import { checkOrigin } from '@/lib/ask-bff';
 import {
   MAX_CREATE_BODY_BYTES,
   badRequest,
@@ -55,6 +56,8 @@ export async function POST(req: Request): Promise<Response> {
   return withBff(
     req,
     async ({ traceId }) => {
+      const foreign = checkOrigin(req, traceId, ROUTE);
+      if (foreign) return foreign;
       const read = await readBodyCapped(req, MAX_CREATE_BODY_BYTES);
       if (read.kind === 'too_large') return payloadTooLarge(ROUTE, traceId);
       if (read.kind === 'unreadable') return badRequest(ROUTE, traceId);

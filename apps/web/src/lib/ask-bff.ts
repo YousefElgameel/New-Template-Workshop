@@ -1,7 +1,10 @@
 import { log } from '@/lib/logger';
 import { sseFrame } from '@/lib/sse';
+import { askLimiter, clientKeyOf, isSameOriginRequest, type Release } from '@/lib/ask-limits';
 import {
   badRequest,
+  busy,
+  invalidOrigin,
   isJsonContentType,
   isUuid,
   payloadTooLarge,
@@ -31,6 +34,11 @@ export const MAX_ASK_BODY_BYTES = 64 * 1024;
  * web app has its own request timeout, which is not configured by this repo.
  */
 export const ASK_HOP_TIMEOUT_MS = 300_000;
+/**
+ * A slot is never held longer than the hop timeout plus this, whatever the reader does: a client
+ * that stops reading without closing the connection must not pin it.
+ */
+export const SLOT_HOLD_MS = ASK_HOP_TIMEOUT_MS + 5_000;
 
 /**
  * The deadline for the api call: the hop timeout, or the browser leaving — whichever comes first.
@@ -42,6 +50,24 @@ export function askSignal(req: Request): AbortSignal {
 }
 /** Most bytes the BFF forwards of one answer stream; an answer is at most 4,000 characters. */
 export const MAX_STREAM_BYTES = 1024 * 1024;
+
+/** `403 invalid_origin` for a request a browser sent on behalf of another site, else `null`. */
+export function checkOrigin(req: Request, traceId: string, route: string): Response | null {
+  return isSameOriginRequest(req) ? null : invalidOrigin(route, traceId);
+}
+
+export type Slot = { ok: true; release: Release } | { ok: false; response: Response };
+
+/**
+ * Take one of this instance's ask slots for the requesting client, or the `429 busy` to send back.
+ * Call it after the request is validated (a bad request must not use a slot) and release it on every
+ * path out: `releaseWhenDone` for a stream, a `finally` for a JSON call.
+ */
+export function acquireAsk(req: Request, traceId: string, route: string): Slot {
+  const taken = askLimiter().tryAcquire(clientKeyOf(req));
+  if (!taken.ok) return { ok: false, response: busy(route, traceId, taken.why) };
+  return { ok: true, release: taken.release };
+}
 
 const NUL = String.fromCharCode(0);
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;

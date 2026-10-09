@@ -1,7 +1,15 @@
 import { withBff } from '@/lib/trace';
 import { log } from '@/lib/logger';
 import { isMockUpstream, mockJson, mockSse } from '@/lib/mocks';
-import { askSignal, guardStream, readAskRequest } from '@/lib/ask-bff';
+import {
+  SLOT_HOLD_MS,
+  acquireAsk,
+  askSignal,
+  checkOrigin,
+  guardStream,
+  readAskRequest,
+} from '@/lib/ask-bff';
+import { releaseWhenDone } from '@/lib/ask-limits';
 import { apiUrl, relayJson, upstreamUnreachable } from '@/lib/conversations-bff';
 import { proxyStream, streamUpstream } from '@/lib/stream';
 import {
@@ -29,53 +37,77 @@ export async function POST(
   return withBff(
     req,
     async ({ traceId }) => {
+      const foreign = checkOrigin(req, traceId, ROUTE);
+      if (foreign) return foreign;
       const { id } = await ctx.params;
       const ask = await readAskRequest(req, id, traceId, ROUTE);
       if (!ask.ok) return ask.response;
       log('info', 'bff inbound', { route: ROUTE, method: 'POST' });
+      const slot = acquireAsk(req, traceId, ROUTE);
+      if (!slot.ok) return slot.response;
 
-      if (isMockUpstream()) {
-        if (!mockConversationExists(id.toLowerCase())) {
-          return mockJson({ error: 'not_found', trace_id: traceId }, traceId, 404);
+      // The slot is released when the stream ends — done, error, the browser leaving — or at once on
+      // any path that returns without one.
+      let streaming = false;
+      try {
+        if (isMockUpstream()) {
+          if (!mockConversationExists(id.toLowerCase())) {
+            return mockJson({ error: 'not_found', trace_id: traceId }, traceId, 404);
+          }
+          const failing = new URL(req.url).searchParams.get('mock') === 'failure';
+          const mocked = mockSse(
+            failing ? conversationAskFailureFrames : conversationAskStreamFrames,
+            traceId,
+          );
+          const response = new Response(releaseWhenDone(mocked.body, slot.release, SLOT_HOLD_MS), {
+            status: mocked.status,
+            headers: mocked.headers,
+          });
+          streaming = true; // only now: if building the response threw, the finally frees the slot
+          return response;
         }
-        const failing = new URL(req.url).searchParams.get('mock') === 'failure';
-        return mockSse(
-          failing ? conversationAskFailureFrames : conversationAskStreamFrames,
+
+        let upstream: Response;
+        try {
+          upstream = await streamUpstream(
+            apiUrl(`/v1/conversations/${ask.id}/ask/stream`),
+            traceId,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ question: ask.question }),
+              signal: askSignal(req),
+              redirect: 'error',
+            },
+          );
+        } catch {
+          return upstreamUnreachable(ROUTE, traceId);
+        }
+
+        if (!upstream.ok) return await relayJson(upstream, traceId, ROUTE);
+        const type = upstream.headers.get('content-type') ?? '';
+        if (!upstream.body || !/^text\/event-stream\s*(;|$)/i.test(type)) {
+          void upstream.body?.cancel().catch(() => undefined);
+          log('error', 'bff upstream stream was not an event stream', { route: ROUTE });
+          return Response.json(
+            { error: 'upstream_error', target: 'api', trace_id: traceId },
+            { status: 502 },
+          );
+        }
+        log('info', 'bff upstream stream', { route: ROUTE, status: upstream.status });
+        const guarded = guardStream(upstream.body, traceId, ROUTE);
+        const response = proxyStream(
+          new Response(releaseWhenDone(guarded, slot.release, SLOT_HOLD_MS), {
+            status: upstream.status,
+            headers: upstream.headers,
+          }),
           traceId,
         );
+        streaming = true; // only now: if building the response threw, the finally frees the slot
+        return response;
+      } finally {
+        if (!streaming) slot.release();
       }
-
-      let upstream: Response;
-      try {
-        upstream = await streamUpstream(apiUrl(`/v1/conversations/${ask.id}/ask/stream`), traceId, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ question: ask.question }),
-          signal: askSignal(req),
-          redirect: 'error',
-        });
-      } catch {
-        return upstreamUnreachable(ROUTE, traceId);
-      }
-
-      if (!upstream.ok) return relayJson(upstream, traceId, ROUTE);
-      const type = upstream.headers.get('content-type') ?? '';
-      if (!upstream.body || !/^text\/event-stream\s*(;|$)/i.test(type)) {
-        void upstream.body?.cancel().catch(() => undefined);
-        log('error', 'bff upstream stream was not an event stream', { route: ROUTE });
-        return Response.json(
-          { error: 'upstream_error', target: 'api', trace_id: traceId },
-          { status: 502 },
-        );
-      }
-      log('info', 'bff upstream stream', { route: ROUTE, status: upstream.status });
-      return proxyStream(
-        new Response(guardStream(upstream.body, traceId, ROUTE), {
-          status: upstream.status,
-          headers: upstream.headers,
-        }),
-        traceId,
-      );
     },
     { routeClass: ROUTE },
   );

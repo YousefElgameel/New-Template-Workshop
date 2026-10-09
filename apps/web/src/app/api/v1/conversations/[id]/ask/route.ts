@@ -1,7 +1,7 @@
 import { withBff } from '@/lib/trace';
 import { log } from '@/lib/logger';
 import { isMockUpstream, mockJson } from '@/lib/mocks';
-import { askSignal, readAskRequest } from '@/lib/ask-bff';
+import { acquireAsk, askSignal, checkOrigin, readAskRequest } from '@/lib/ask-bff';
 import { callApi } from '@/lib/conversations-bff';
 import { conversationAskResponse, mockConversationExists } from '@/mocks/conversations';
 
@@ -24,22 +24,30 @@ export async function POST(
   return withBff(
     req,
     async ({ traceId }) => {
+      const foreign = checkOrigin(req, traceId, ROUTE);
+      if (foreign) return foreign;
       const { id } = await ctx.params;
       const ask = await readAskRequest(req, id, traceId, ROUTE);
       if (!ask.ok) return ask.response;
       log('info', 'bff inbound', { route: ROUTE, method: 'POST' });
+      const slot = acquireAsk(req, traceId, ROUTE);
+      if (!slot.ok) return slot.response;
 
-      if (isMockUpstream()) {
-        return mockConversationExists(id.toLowerCase())
-          ? mockJson(conversationAskResponse, traceId)
-          : mockJson({ error: 'not_found', trace_id: traceId }, traceId, 404);
+      try {
+        if (isMockUpstream()) {
+          return mockConversationExists(id.toLowerCase())
+            ? mockJson(conversationAskResponse, traceId)
+            : mockJson({ error: 'not_found', trace_id: traceId }, traceId, 404);
+        }
+        return await callApi(`/v1/conversations/${ask.id}/ask`, traceId, ROUTE, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ question: ask.question }),
+          signal: askSignal(req),
+        });
+      } finally {
+        slot.release();
       }
-      return callApi(`/v1/conversations/${ask.id}/ask`, traceId, ROUTE, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ question: ask.question }),
-        signal: askSignal(req),
-      });
     },
     { routeClass: ROUTE },
   );

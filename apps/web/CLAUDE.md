@@ -33,6 +33,12 @@ URL.
   or > 1 MiB, ends the stream with one terminal `error` frame carrying the trace id; the browser leaving cancels the
   api stream). The api's `404`/`413`/`422`/`429`/`503` pass through via `relayJson`; mock mode serves the 1.1
   fixtures (`?mock=failure` for the failing stream). Logs: route pattern + status, never the id or the question.
+  `src/lib/ask-limits.ts` holds the cap on asks in flight (`AskLimiter`: `ASK_MAX_INFLIGHT` 8 per instance,
+  `ASK_MAX_INFLIGHT_PER_CLIENT` 2 per client = the **rightmost** `X-Forwarded-For`, else one shared bucket; `429 busy`;
+  `ASK_TRUSTED_PROXY_HOPS` shifts it left behind extra proxies; `normaliseAddress` drops port/zone, maps IPv4-mapped IPv6 to IPv4 and IPv6 to its /64;
+  `releaseWhenDone` gives the slot back when a stream ends, fails, the browser leaves, or `SLOT_HOLD_MS` passes) and `isSameOriginRequest` (the
+  `Origin` host or `Sec-Fetch-Site: cross-site` → `403 invalid_origin`, checked first on the three write routes);
+  `ask-bff.ts` has `checkOrigin` and `acquireAsk`. Addresses are map keys only — never logged.
 - `src/app/api/v1/conversations/route.ts` (`GET` list, `POST` create) + `[id]/route.ts` (`GET` open) — the BFF
   mirror of `/v1/conversations`. `src/lib/conversations-bff.ts` holds what they share: the UUID check for `[id]`
   (it goes into the upstream URL), `limit` 1–100, the create-body validation (only `title`, ≤ 200 UTF-16 units,

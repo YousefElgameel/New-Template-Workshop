@@ -7,6 +7,43 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-09
+
+### Added
+
+- **A cap on asks in flight** (web roadmap 3.4; threat model G1): `POST /api/v1/conversations/[id]/ask` and
+  `…/ask/stream` answer `429 busy` — the api's own `{ error, trace_id }` shape, `x-trace-id` echoed — when this instance
+  already has **8** asks in flight, or the client already has **2**, before anything is sent to the api. The client is the
+  **rightmost** `X-Forwarded-For` address (Azure Container Apps appends the address it saw; everything to its left is
+  whatever the client claimed and is ignored); a request with no usable address — local development, tests — shares one
+  bucket. A slot is taken after the request is validated (a bad request never uses one) and given back on every path out:
+  the answer ends, fails, the api cannot be reached, or the browser leaves mid-stream (`src/lib/ask-limits.ts`).
+  - `ASK_MAX_INFLIGHT` (8) and `ASK_MAX_INFLIGHT_PER_CLIENT` (2), server-side, read at each ask; a mistyped value, `0` or
+    one above 1000 is the default, never "no limit".
+  - `ASK_TRUSTED_PROXY_HOPS` (0..5, default 0): proxies in front of the ingress that append their own address; the client is
+    then that many entries from the right (fewer entries than that is the shared bucket, never a guess further left).
+  - The client key is normalised, so a form of the address cannot make a new client: a `:port` or a `%zone` is dropped, an
+    IPv4-mapped IPv6 address is its IPv4 address, and any other IPv6 address is its `/64` network.
+  - A slot is also released when `ASK_HOP_TIMEOUT_MS` + 5 s has passed, whatever the reader is doing (a browser that stops
+    reading without closing the connection cannot hold one for as long as the ingress lets it); the api stream is cancelled.
+  - The counters live in memory, per instance: with several replicas each has its own cap. Addresses are only keys of that
+    map — never logged, never on a span or a metric; a refusal logs the route, the status and which cap (`instance` or
+    `client`).
+- **A same-origin check on the conversation write routes** (`POST /api/v1/conversations`, `…/ask`, `…/ask/stream`; threat
+  model G4): a request whose `Origin` is present and is not this app's own host (`Origin: null` too), or that the browser
+  marks `Sec-Fetch-Site: cross-site`, is refused `403 invalid_origin` before its body is read. The host is compared, not the
+  scheme (behind the ingress the request is http while the browser's origin is https). A request with neither header (curl,
+  a test) passes: this stops another site from using a visitor's browser, it is not an authentication.
+
+### Known limits
+
+- With several replicas the cap is per instance, and behind a proxy that hides the client address (a Front Door or an
+  application gateway in front of the ingress) every client shares the proxy's address, so the per-client cap of 2 is
+  then a cap for everyone: raise `ASK_MAX_INFLIGHT_PER_CLIENT` or restrict the ingress instead.
+- The same-origin check compares `Origin` with the `Host` header the app receives. It does not defend against DNS rebinding
+  (a page on another name that resolves to this app sends its own `Host`), and the `GET` routes are not checked.
+- The stronger control is an ingress IP allow-list on the web container app (the cloud team); nothing here sets it.
+
 ## [0.7.1] — 2026-10-07
 
 ### Removed

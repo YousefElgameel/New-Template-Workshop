@@ -400,13 +400,15 @@ Source: `apps/web/src/app/api/v1/conversations/[id]/ask/route.ts` and `ask/strea
 `src/lib/ask-bff.ts` (web roadmap 3.1). Body `{ "question": string }`. The BFF answers itself, with no upstream call,
 in this order:
 
-| When                                                                                         | Status                          |
-| -------------------------------------------------------------------------------------------- | ------------------------------- |
-| `[id]` is not a UUID (it goes into the upstream URL)                                         | `400 invalid_request`           |
-| the body is not declared `application/json` (a cross-site "simple" request has no preflight) | `415 unsupported_media_type`    |
-| the body is over 64 KiB (counted while reading), or cannot be read within 5 s                | `413 payload_too_large` / `400` |
-| not JSON, not an object, a key other than `question`, blank, NUL, a lone surrogate           | `400 invalid_request`           |
-| the question is over 4,000 characters (code points, like the api)                            | `413 payload_too_large`         |
+| When                                                                                                                                                              | Status                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `[id]` is not a UUID (it goes into the upstream URL)                                                                                                              | `400 invalid_request`           |
+| the body is not declared `application/json` (a cross-site "simple" request has no preflight)                                                                      | `415 unsupported_media_type`    |
+| `Origin` is present and is not the app's own host, or `Sec-Fetch-Site: cross-site` (checked first, before the body is read; also on `POST /api/v1/conversations`) | `403 invalid_origin`            |
+| this instance already has `ASK_MAX_INFLIGHT` (8) asks in flight, or the client `ASK_MAX_INFLIGHT_PER_CLIENT` (2) (checked last, after the request is valid)       | `429 busy`                      |
+| the body is over 64 KiB (counted while reading), or cannot be read within 5 s                                                                                     | `413 payload_too_large` / `400` |
+| not JSON, not an object, a key other than `question`, blank, NUL, a lone surrogate                                                                                | `400 invalid_request`           |
+| the question is over 4,000 characters (code points, like the api)                                                                                                 | `413 payload_too_large`         |
 
 - The api's `404 not_found`, `413`, `422`, `429 busy` and `503 ai_unavailable` are **not rewritten**: status and
   `{ error, trace_id }` reach the browser (no other field of the body does). For the stream route that holds for errors the api reports **before the first byte**
@@ -414,6 +416,11 @@ in this order:
 - An api that cannot be reached, a reply that is not JSON, or an error body without the api's shape is
   `502 { error: "upstream_unreachable" | "upstream_error", target: "api", trace_id }`. A `200` that is not
   `text/event-stream` is a `502` too.
+- **Asks in flight.** The client is the rightmost `X-Forwarded-For` address (Container Apps appends it; the others are
+  client-supplied and ignored), else one shared bucket (`ASK_TRUSTED_PROXY_HOPS` moves it left when proxies sit in front of the ingress; the address is
+  normalised: no port or zone, IPv4-mapped IPv6 is IPv4, other IPv6 is its /64). A slot is released when the answer ends,
+  fails, the api cannot be reached, or the browser leaves, and at the latest `ASK_HOP_TIMEOUT_MS` + 5 s after it was taken; the counters are in memory, per instance, and never logged with an address. The same-origin
+  check compares the host (not the scheme): it stops another site from using a visitor's browser, it is not an authentication.
 - **Timeout.** The BFF → api hop timeout is 5 minutes (`ASK_HOP_TIMEOUT_MS`): above the api's worst case (180 s at the
   defaults), so the 10 s `fetchUpstream` default does not cut an answer short. It also ends when the browser leaves, which
   frees the api's concurrency slot. The ingress in front of the web app has its own request timeout; this repo does not
