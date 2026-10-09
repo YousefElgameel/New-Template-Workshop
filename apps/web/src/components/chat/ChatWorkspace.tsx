@@ -423,6 +423,12 @@ export function ChatWorkspace() {
           disabled={streaming || thread.status === 'loading' || thread.status === 'error'}
           onSubmit={(question) => void send(question)}
         />
+        <p
+          data-testid="shared-chats-notice"
+          className="text-xs text-neutral-600 dark:text-neutral-400"
+        >
+          Chats are shared with the team. Do not enter personal data.
+        </p>
       </section>
     </div>
   );

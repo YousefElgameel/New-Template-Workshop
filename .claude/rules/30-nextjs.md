@@ -50,6 +50,14 @@ openapi`); CI fails when it is stale. Type request/response shapes from it, neve
   **is** the rule. The existing demo routes (`/api/ping-backend`, `/api/info-backend`, `/health`)
   are not business endpoints and stay as-is.
 
+## Security headers (web roadmap 3.5)
+
+- `src/proxy.ts` sets the `Content-Security-Policy` (a per-request nonce for pages, `default-src 'none'` for `/api/**` and
+  `/health`); `next.config.ts` `headers()` sets `nosniff`, `Referrer-Policy` and `Permissions-Policy`. The values live in
+  `src/lib/security-headers.ts` and are tested. The root layout's `await connection()` makes every page dynamic (a nonce
+  needs a request) — do not remove it. No inline `<script>`, no `style=` attribute, no new origin without changing the
+  policy and its test.
+
 ## Logging & observability
 
 - Log via `src/lib/logger.ts` (pino → JSON stdout) — never `console.log`.

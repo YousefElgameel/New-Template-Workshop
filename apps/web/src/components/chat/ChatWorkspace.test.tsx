@@ -51,6 +51,8 @@ function deferred() {
   return { promise, resolve };
 }
 
+const NOTICE = 'Chats are shared with the team. Do not enter personal data.';
+
 const rowsOf = () =>
   within(screen.getByRole('navigation', { name: 'Conversations' })).getAllByRole('listitem');
 
@@ -565,6 +567,18 @@ describe('<ChatWorkspace /> — sending a question', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('keeps the shared-chats notice in view while an answer streams', async () => {
+    const live = liveStream();
+    const { user, box } = await openTracing({ [stream(conversationIds.tracing)]: live.handler });
+    await user.type(box, 'Which port?{Enter}');
+    expect(await screen.findByLabelText('Streaming')).toBeInTheDocument();
+    expect(screen.getByTestId('shared-chats-notice')).toHaveTextContent(NOTICE);
+    live.push(DONE());
+    live.end();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toBeEnabled());
+    expect(screen.getByTestId('shared-chats-notice')).toHaveTextContent(NOTICE);
+  });
+
   it('moves a titled conversation to the top of the list when its answer is done, keeping its title', async () => {
     stubFetch({
       [LIST]: ok(conversationListFixture),
@@ -1003,5 +1017,63 @@ describe('<ChatWorkspace /> — sending a question', () => {
     expect(rowsOf()[0]).toHaveTextContent('New conversation');
     // ...and nothing was asked in it.
     expect(screen.queryByLabelText('Streaming')).not.toBeInTheDocument();
+  });
+});
+
+describe('<ChatWorkspace /> — the shared-chats notice', () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const notice = () => screen.getByTestId('shared-chats-notice');
+
+  it('is plain text next to the input, in the same panel', async () => {
+    stubFetch({ [LIST]: ok(conversationListFixture) });
+    render(<ChatWorkspace />);
+    expect(notice()).toHaveTextContent(NOTICE);
+    expect(notice().children).toHaveLength(0);
+    const panel = screen.getByRole('region', { name: 'Chat' });
+    expect(panel).toContainElement(notice());
+    expect(panel).toContainElement(screen.getByRole('textbox', { name: 'Message' }));
+    await screen.findByRole('button', { name: /Error contract/ });
+  });
+
+  it('is there while the list loads, when it is empty and when it failed', async () => {
+    const gate = deferred();
+    stubFetch({ [LIST]: () => gate.promise });
+    const first = render(<ChatWorkspace />);
+    expect(notice()).toHaveTextContent(NOTICE);
+    gate.resolve(Response.json(emptyConversationList));
+    await screen.findByTestId('conversations-empty');
+    expect(notice()).toHaveTextContent(NOTICE);
+    first.unmount();
+
+    stubFetch({ [LIST]: fail('upstream_error') });
+    render(<ChatWorkspace />);
+    await screen.findByRole('alert');
+    expect(notice()).toHaveTextContent(NOTICE);
+  });
+
+  it('is there while a conversation loads, when it is ready and when it failed to load', async () => {
+    const gate = deferred();
+    stubFetch({
+      [LIST]: ok(conversationListFixture),
+      [open(conversationIds.tracing)]: () => gate.promise,
+      [open(conversationIds.errors)]: fail('upstream_error'),
+    });
+    const user = userEvent.setup();
+    render(<ChatWorkspace />);
+    await user.click(await screen.findByRole('button', { name: /How does trace_id/ }));
+    expect(await screen.findByText('Loading conversation…')).toBeInTheDocument();
+    expect(notice()).toHaveTextContent(NOTICE);
+
+    gate.resolve(Response.json(conversationDetails[conversationIds.tracing]));
+    await screen.findByText(/The trace id is minted/);
+    expect(notice()).toHaveTextContent(NOTICE);
+
+    await user.click(screen.getByRole('button', { name: /Error contract/ }));
+    await screen.findByText(/Could not load this conversation/);
+    expect(notice()).toHaveTextContent(NOTICE);
   });
 });

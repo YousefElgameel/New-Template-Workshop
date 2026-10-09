@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { STATIC_SECURITY_HEADERS } from './src/lib/security-headers';
 
 const nextConfig: NextConfig = {
   // Produce a self-contained build for Docker (.next/standalone/server.js).
@@ -24,6 +25,11 @@ const nextConfig: NextConfig = {
   // build) don't mis-infer the repo root from sibling lockfiles.
   turbopack: { root: __dirname },
   outputFileTracingRoot: __dirname,
+  // Security headers that do not vary per request, on every path (web roadmap 3.5). The
+  // Content-Security-Policy varies (a nonce per page) and is set by `src/proxy.ts`.
+  async headers() {
+    return [{ source: '/:path*', headers: [...STATIC_SECURITY_HEADERS] }];
+  },
 };
 
 export default nextConfig;

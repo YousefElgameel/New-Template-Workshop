@@ -7,6 +7,33 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-09
+
+### Added
+
+- **Security headers on every response** (web roadmap 3.5; threat model G5, G11):
+  - `Content-Security-Policy`, set per request by `src/proxy.ts`. A page gets `default-src 'self'`, `script-src` and
+    `style-src` by a fresh per-request **nonce** (with `'strict-dynamic'`; no `unsafe-inline`, and `unsafe-eval` only in
+    development), `img-src`/`connect-src`/`font-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`,
+    `frame-ancestors 'none'`. A JSON response (`/api/**`, `/health`) gets `default-src 'none'; frame-ancestors 'none'`. A
+    `Content-Security-Policy` or `x-nonce` the client sends is overwritten.
+  - `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` and a `Permissions-Policy` with
+    the sensors, payment and USB off, on every path (`next.config.ts` `headers()`; `src/lib/security-headers.ts`).
+- **A notice on the chat page**, under the input in every state: "Chats are shared with the team. Do not enter personal
+  data."
+
+### Changed
+
+- Every page is now rendered per request (`await connection()` in the root layout): Next can only apply a nonce while
+  rendering for a request, so a static page could not carry one. The pages are thin and the data is fetched in the browser,
+  so there is little to lose; the routes table of `next build` shows `ƒ` (dynamic) for all of them.
+
+### Known limits
+
+- The policy is exercised by a production build and `curl` (headers and nonces match in one response), not yet in a
+  browser: a CSP violation shows only in the browser console (see the roadmap item's `needs_human`).
+- No `Strict-Transport-Security`: the ingress terminates TLS and the cloud team owns that setting.
+
 ## [0.8.0] — 2026-10-09
 
 ### Added

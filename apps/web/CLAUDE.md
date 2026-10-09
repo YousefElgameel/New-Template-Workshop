@@ -111,7 +111,15 @@ URL.
   See `.claude/rules/60-observability.md`.
 - `src/instrumentation.ts` — `register()` → `if (process.env.NEXT_RUNTIME === 'nodejs')` →
   `initObservability()`, then `trackEvent('service.start')`.
-- `next.config.ts` — `output: 'standalone'`, `serverExternalPackages`
+- `src/proxy.ts` (+ `src/lib/security-headers.ts`) — sets `Content-Security-Policy` on every response: a page gets a
+  per-request **nonce** policy (Next reads the nonce from the request header and applies it to its own scripts and
+  styles), a JSON route (`/api/**`, `/health`) the closed `default-src 'none'`; a client-sent policy or `x-nonce` is
+  overwritten. Because a nonce can only be applied while rendering for a request, the root layout calls
+  `await connection()`: **every page is dynamic** — a new page needs no extra step, but an inline `<script>`, an inline
+  `style=` attribute or a third-party origin is blocked by the policy (add a nonce, a class, or change the policy and its
+  test). `nosniff`, `Referrer-Policy` and `Permissions-Policy` are fixed headers set by `next.config.ts` `headers()`.
+  `ChatWorkspace` shows the shared-chats notice under the input in every state.
+- `next.config.ts` — `output: 'standalone'`, `headers()` (the fixed security headers), `serverExternalPackages`
   (`@azure/monitor-opentelemetry`, the `@opentelemetry/*` api/instrumentation packages, `pino`),
   and `turbopack.root` + `outputFileTracingRoot` pinned to this directory.
 

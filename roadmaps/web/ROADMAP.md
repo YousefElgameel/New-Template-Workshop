@@ -296,7 +296,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 3.5 — Shared-chats notice and security headers
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [3.3]
 - **layers:** [ui, bff]
 - **acceptance:**
@@ -304,11 +304,26 @@ conversation surface (decision 18) — the removal is item 4.1._
   - every response of the web app carries `Content-Security-Policy` (`default-src 'self'`; `script-src` as Next needs it, with a nonce or hash rather than `unsafe-inline` where the framework allows; `img-src 'self'`; `connect-src 'self'`; `frame-ancestors 'none'`; `base-uri 'self'`; `form-action 'self'`), `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` and `Permissions-Policy` with the sensors off; set in `next.config.ts` (or `proxy`), tested, and the page still loads and streams under it (a production build is exercised, not only unit tests)
   - the headers and the notice are described in `apps/web/CLAUDE.md` and `docs/reference/http-api.md`
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm test` in `apps/web` — expect **28 files, 685 tests** passed (new: `security-headers.test.ts`, `proxy.test.ts`, `layout.test.tsx`, and notice cases in `ChatWorkspace.test.tsx`); `pnpm typecheck` clean
+  - **a production build, the headers on the wire:** `pnpm build` → the routes table shows `ƒ` (dynamic) for every route, and `ƒ Proxy (Middleware)`. Then `MOCK_UPSTREAM=true pnpm exec next start -p 3100` and:
+    - `curl -sD - -o /dev/null http://localhost:3100/chat` → `content-security-policy: default-src 'self'; script-src 'self' 'nonce-…' 'strict-dynamic'; style-src 'self' 'nonce-…'; img-src 'self'; connect-src 'self'; …; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, a `Permissions-Policy` with the sensors `=()`, and `Cache-Control: private, no-cache, no-store…`
+    - the same request twice → a different nonce each time; the nonce in the header is the one on every `<script nonce="…">` of the HTML body
+    - `curl -sD - http://localhost:3100/health` and `…/api/v1/conversations` → `content-security-policy: default-src 'none'; frame-ancestors 'none'` and the `x-trace-id` header still there; an unknown path (`/nope`) → `404` with a nonce policy
+    - `curl -sN -X POST http://localhost:3100/api/v1/conversations/5b1f3a52-8c1e-4d3a-9d0b-1a2b3c4d5e01/ask/stream -H 'content-type: application/json' -d '{"question":"hi"}'` → `200 text/event-stream` with the frames
+  - **the notice, in a browser:** `pnpm dev`, open http://localhost:3000/chat → "Chats are shared with the team. Do not enter personal data." under the input, also while the list loads, with no conversation open, and while an answer streams
+  - prove the tests bite: in `security-headers.ts` add `'unsafe-inline'` to `script-src`, open `img-src`, drop `nosniff` or the decoding in `isApiPath`; in `proxy.ts` drop either `Content-Security-Policy` line or the matcher's coverage of `/api`; in `layout.tsx` drop `await connection()`; in `next.config.ts` drop `headers()`; in `ChatWorkspace.tsx` drop the notice: the matching tests fail (24 such changes tried, all caught)
 - **needs_human:**
-  - open `/chat` in a browser after a production build and confirm the console shows no CSP violation while a question streams
+  - open `/chat` in a browser **after a production build** (`pnpm build`, then `pnpm exec next start`) and confirm the console shows **no CSP violation** while a question streams — a violation only shows in the browser console and I could not open one from here. Also open it once under `pnpm dev`: the development policy allows `unsafe-eval` and inline styles, which Next's dev server needs
+  - tell me whether the cloud team sets `Strict-Transport-Security` (and HTTPS-only) on the ingress; this item does not, because TLS ends at the platform
 - **notes:**
   - 2026-10-07 — planned from the proposed decisions of the threat model §8a (G5, G11): proposed by Claude on Yousef Wahid's instruction to decide.
+  - 2026-10-09 — started by Claude.
+  - 2026-10-09 — implemented by Claude, awaiting test by Yousef Wahid. Files: `src/proxy.ts` (CSP per request, nonce), `src/lib/security-headers.ts` (policy, closed API policy, fixed headers), `next.config.ts` (`headers()`), `src/app/layout.tsx` (`await connection()`), `ChatWorkspace.tsx` (the notice), their tests, `apps/web/CLAUDE.md`, `.claude/rules/30-nextjs.md`, `docs/reference/http-api.md`, `CHANGELOG.md` + `package.json` (0.9.0). Reviews: `code-reviewer` and `security-reviewer`; no CRITICAL/HIGH.
+  - 2026-10-09 — fixed after review: development allows inline styles (Next's dev server injects `<style>` without a nonce); `isApiPath` decodes the path first and treats one it cannot decode as a JSON route; a test pins `await connection()` in the layout and another the development/production difference; a production build was run and probed with curl (headers, nonce match in one response, 404 page, SSE route, an oversized POST still `413`, a foreign origin still `403`).
+  - 2026-10-09 — DECISIONS: pages are all dynamic (a nonce can only be applied while rendering for a request); `/api/**` and `/health` get `default-src 'none'`; no `upgrade-insecure-requests` and no HSTS (TLS is the platform's); the proxy matcher does not exclude prefetches (every response gets its own nonce, harmless while no page is static).
+  - 2026-10-09 — not done, recorded: a browser check for CSP violations (needs a person); a build-output assertion in CI (the layout test pins the cause, not the build table); `Permissions-Policy` does not list `browsing-topics`.
+  - 2026-10-09 — version 0.9.0 (MINOR: new headers and notice, backward compatible).
+  - 2026-10-09 — confirmed by Yousef Wahid.
 
 ## Phase 4 — Cleanup and go-live
 
