@@ -136,8 +136,9 @@ Four things to internalise:
    so either works for `web` — pick one and stay consistent.)
 2. **Ambient env always wins.** A value already exported in your shell (or injected by
    Compose / Container Apps) is never overwritten by a `.env` file.
-3. **Containers never ship `.env` files.** Every `.dockerignore` excludes `.env` / `.env.*`,
-   so a container's configuration comes only from its environment.
+3. **Containers never ship `.env` files.** The web build's `.dockerignore` and the repository-root `.dockerignore`
+   (which governs the api image, built from the repository root) exclude `.env` / `.env.*`, and the Dockerfiles copy
+   named paths only, so a container's configuration comes only from its environment.
 4. **Leaving `APPLICATIONINSIGHTS_CONNECTION_STRING` empty is correct locally.** That is
    _degraded mode_, not a failure — see [Verifying your setup](#verifying-your-setup).
 

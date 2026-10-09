@@ -123,8 +123,9 @@ graph still answers, with an empty context.
 **`ingest.py`.** The RAG ingestion job owns the index definition (`build_index`: `id`,
 `content`, `source`, `title`, `chunk_index`, `content_vector` with an HNSW profile sized by
 `AZURE_AI_EMBEDDING_DIMENSIONS`) so the retriever and the index cannot drift. The corpus is every
-`.md` file under `CORPUS_DIR` (default: the repository's `docs/`; `/app/corpus` in the image,
-ADR-0013); a document's `source` is always `docs/<path inside the corpus>` and its `title` is its
+`.md` file under `CORPUS_DIR` (default: `/app/corpus` when `APP_ENV` is not `local` and the image has
+one — the repository's `docs/**/*.md`, copied in at build time after `scripts/check_corpus_secrets.py` found no
+secret-looking string in them, ADR-0013 — else the repository's `docs/`); a document's `source` is always `docs/<path inside the corpus>` and its `title` is its
 first top-level `# ` heading outside code fences, else the file name, carried by every chunk and
 returned by retrieval. `ensure_index` creates the index or updates it in place, and **refuses**
 an existing index whose vector size differs from the configured one (it never deletes or

@@ -27,7 +27,7 @@ on:
     paths: ['infra/**', '.github/workflows/infra.yml']
   push:
     branches: [development, staging, main]
-    paths: ['infra/**', 'apps/**', '.github/workflows/infra.yml']
+    paths: ['infra/**', 'apps/**', 'docs/**', '.github/workflows/infra.yml']
   workflow_dispatch:
     inputs:
       environment:
@@ -153,7 +153,10 @@ jobs:
     env:
       REGISTRY: ${{ needs.resolve.outputs.registry }}
     steps:
+      # No git credential is left in .git/config: the repository root is the api image's build context.
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: azure/login@v2
         with:
           client-id: ${{ secrets[format('{0}_AZURE_CLIENT_ID', needs.resolve.outputs.prefix)] }}
@@ -170,7 +173,7 @@ jobs:
           echo "web_image=$REGISTRY/$SLUG-web:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
       - name: Build + push api
         run: |
-          docker build --tag "${{ steps.tags.outputs.api_image }}" apps/api
+          docker build --file apps/api/Dockerfile --tag "${{ steps.tags.outputs.api_image }}" .
           docker push "${{ steps.tags.outputs.api_image }}"
       - name: Build + push web
         run: |

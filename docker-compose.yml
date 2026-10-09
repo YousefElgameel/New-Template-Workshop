@@ -2,8 +2,9 @@
 # Team Assistant — full stack.
 #   web (Next.js BFF, :3000) -> api (FastAPI + SQLAlchemy 2 async, :8000)
 #
-# Each service builds from its own per-app Dockerfile/context (also buildable
-# standalone with `docker build apps/<svc>`). One shared bridge network; service
+# Each service builds from its own per-app Dockerfile (web: context apps/web, also
+# buildable with `docker build apps/web`; api: the repository root, because its image
+# carries docs/**/*.md as the corpus - `docker build --file apps/api/Dockerfile .`). One shared bridge network; service
 # DNS names (web/api) resolve on it. NO database service, ever — DATABASE_URL
 # points at an Azure SQL database (created by the use-case Bicep deployment), supplied via env;
 # the api's engine is lazy, so the stack boots with the placeholder.
@@ -16,7 +17,9 @@ name: team-assistant
 services:
   api:
     build:
-      context: ./apps/api
+      # The repository root: the image carries docs/**/*.md as its corpus (ADR-0013).
+      context: .
+      dockerfile: apps/api/Dockerfile
     image: team-assistant-api
     environment:
       APP_ENV: ${APP_ENV:-local}

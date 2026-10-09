@@ -87,6 +87,21 @@ this as a starting map; read the actual files when you need detail.
   (`python -m app.ai.ingest [--corpus DIR] [--no-prune|--force-prune]`; `ingest_corpus()` is the whole run, the corpus size cap `INGEST_MAX_FILES`/`INGEST_MAX_BYTES` refuses before any file is read; owns the index definition, the `.md`-only corpus loader — paths resolved first, nothing outside the root read, text cleaned, comments dropped —, the dimension guards, stale-chunk removal after a complete run and a timeout on every call). `app/admin.py` guards the admin routes with `x-admin-key` = `INGEST_ADMIN_KEY` (fails closed when unset or under 32 characters; constant-time; never logged; names on the redaction list) and `routers/admin.py` serves `POST /v1/admin/ingest` — never forwarded by the BFF. A project
   adds `/v1/...` routes that call it (`docs/architecture/ai.md`).
 
+## The image and its corpus (api 3.4, ADR-0013)
+
+- **Build from the repository root:** `docker build --file apps/api/Dockerfile --tag team-assistant-api .`
+  (`docker compose build`, `ci.yml` and `infra.yml` do the same; `docker build apps/api` no longer works). The root
+  `.dockerignore` governs it (`.env*`, `.git`, keys, `node_modules`, the web app and `infra/` stay out of the
+  context) and the Dockerfile copies named paths only. `apps/api/.dockerignore` is no longer read.
+- **The `corpus` stage** keeps the visible `.md` files of `docs/`, runs `scripts/check_corpus_secrets.py` on them and
+  the build **fails** on a secret-looking string (AWS key id, `sk-`, GitHub token, JWT, private key, Azure keys, Slack,
+  Google, Stripe, bearer tokens, URL credentials, `password=`-style assignments, a UTF-16 or NUL-holding file): the
+  output is file, line and kind, never the text. Documented fake values go in `ALLOWED_EXAMPLES` (exact strings, in a
+  reviewed change). The runtime stage copies the result, root-owned, to `/app/corpus`.
+- **Which corpus the ingest job reads:** `CORPUS_DIR`; else `/app/corpus` when `APP_ENV` is not `local` and it exists;
+  else the repository's `docs/`. So an api run by `docker compose` (`APP_ENV=local`) reads no baked corpus: set
+  `CORPUS_DIR=/app/corpus` there, or run it with another `APP_ENV`.
+
 ## Conventions
 
 - Request-scoped trace id via `contextvars` — read it with `get_trace_id()`.

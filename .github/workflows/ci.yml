@@ -207,4 +207,4 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
       - name: api image build
-        run: docker build --tag team-assistant-api:ci apps/api
+        run: docker build --file apps/api/Dockerfile --tag team-assistant-api:ci .

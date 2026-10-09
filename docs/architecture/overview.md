@@ -224,8 +224,9 @@ fixed paths). Adding another is an ADR change, not a code change.
 One repository, two packages, **no pnpm workspace and no Turborepo**. Each app carries its
 own lockfile, its own `Dockerfile`, and its own dependency graph.
 
-The property this buys: `docker build apps/<svc>` works on its own, from that directory,
-reproducibly. There is no root install step, no workspace-hoisted `node_modules` to reconstruct
+The property this buys: each image builds on its own, reproducibly (`docker build apps/web`; the api image
+is built from the repository root, `docker build --file apps/api/Dockerfile .`, because it carries `docs/**/*.md`
+as the corpus — ADR-0013). There is no root install step, no workspace-hoisted `node_modules` to reconstruct
 inside the image, and no chance of one service's build silently resolving a dependency that
 another service hoisted. A polyglot repo cannot share a lockfile with `apps/api` anyway
 (uv manages that one), so a pnpm workspace would only ever cover the single Node package while

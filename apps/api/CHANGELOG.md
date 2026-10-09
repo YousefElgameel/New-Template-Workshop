@@ -7,6 +7,38 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-09
+
+### Added
+
+- **The api image carries the corpus** (roadmap api 3.4, [ADR-0013](../../docs/adr/0013-corpus-baked-into-api-image.md)):
+  the repository's `docs/**/*.md` (no hidden file or directory, no symlink) at `/app/corpus`, and the ingest job reads
+  it there when `APP_ENV` is not `local` and `CORPUS_DIR` is not set (`IMAGE_CORPUS_DIR` in `app/ai/ingest.py`);
+  locally, and when the image has no corpus, it is still the repository's `docs/`.
+- **A secret check before the copy**: the Dockerfile's new `corpus` stage runs `scripts/check_corpus_secrets.py` on the
+  files and **fails the build** on an AWS access key id, an `sk-` key, a GitHub token, a JWT-shaped string, a private
+  key block (incl. PGP), Azure storage / shared-access / SAS keys, Slack, Google and Stripe keys, a long bearer token,
+  credentials in a URL, a `password=` / `api_key:` style assignment of a letters-and-digits value, and a file that
+  is UTF-16 or holds NUL bytes (a pattern cannot read it). Documented fake values (the AWS docs' `AKIAIOSFODNN7EXAMPLE`)
+  are allowed as exact strings. It prints the file, the line and the kind of pattern, never the text; it also
+  fails on an empty corpus and on a directory that does not exist. The patterns need a realistic length, so a
+  document that merely says "keys start with `AKIA`" passes. A test runs the same check on the repository's own docs.
+
+### Changed
+
+- **The api image is built from the repository root**: `docker build --file apps/api/Dockerfile --tag team-assistant-api .`
+  (`docker compose build` and both workflows, `ci.yml` and `infra.yml`, are updated; `docker build apps/api` no longer
+  works). `docs/` is not inside `apps/api`, and the image needs it. The root `.dockerignore` keeps `.env*`, `.git`,
+  `node_modules`, the web app and the infrastructure out of the build context; the Dockerfile copies named paths only.
+  The final image still runs as `appuser` and never contains an env file; `/app/corpus` is root-owned, so the service
+  cannot rewrite what the next run embeds. The copy uses `find … -exec cp -t … {} +`, so a failing copy fails the build.
+  Contract change for anyone who built the image by hand (`docker build apps/api`): it is internal (CI, compose) in a
+  0.x service, hence MINOR.
+- `infra.yml` also runs on a push that changes `docs/**` (the baked corpus changes with them), and its image job checks
+  out without leaving a git credential in `.git/config`.
+- `APP_ENV` that is blank (only spaces) is `local`, like an unset one (it was an empty string; `/info`, the `env`
+  log field and the corpus choice now read `local` for it).
+
 ## [0.13.0] — 2026-10-09
 
 ### Added

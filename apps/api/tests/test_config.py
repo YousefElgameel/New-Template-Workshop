@@ -52,6 +52,27 @@ def test_external_database_url_is_optional(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.has_external_database is True
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, "local"),
+        ("", "local"),
+        ("   ", "local"),
+        ("local", "local"),
+        (" PROD ", "prod"),
+        ("Dev", "dev"),
+    ],
+)
+def test_app_env_is_lower_cased_and_blank_is_local(
+    monkeypatch: pytest.MonkeyPatch, raw: str | None, expected: str
+) -> None:
+    if raw is None:
+        monkeypatch.delenv("APP_ENV", raising=False)
+    else:
+        monkeypatch.setenv("APP_ENV", raw)
+    assert config.get_settings().app_env == expected
+
+
 def test_other_settings_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.delenv("PORT", raising=False)

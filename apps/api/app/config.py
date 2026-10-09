@@ -101,10 +101,8 @@ def get_version() -> str:
 
 
 def _normalize_env(value: str | None) -> str:
-    """Normalize APP_ENV; unknown/missing is treated as local."""
-    if not value:
-        return "local"
-    return value.strip().lower()
+    """Normalize APP_ENV: lower-cased; missing or blank is local; any other value is kept."""
+    return (value or "").strip().lower() or "local"
 
 
 @dataclass(frozen=True)

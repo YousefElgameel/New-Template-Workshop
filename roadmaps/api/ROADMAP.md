@@ -296,7 +296,7 @@ need a human with access._
 
 ### 3.4 — Corpus baked into the api image
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [3.3]
 - **layers:** [ai]
 - **acceptance:**
@@ -305,14 +305,25 @@ need a human with access._
   - the final image still runs as a non-root user, and `.env*` stays out of the image
   - before the corpus is copied into the image, a check fails the build when a corpus file contains a secret-looking string (`AKIA…`, `sk-…`, `ghp_…`, `eyJ…`, a private-key header); it prints the file name and the pattern kind, never the matched text
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `uv run --directory apps/api pytest` — expect **1021 passed, 5 skipped** (new: `tests/test_corpus_image.py`, 88 tests with 1 skipped on Windows that runs the Dockerfile's `find` on Linux; `test_config.py` cases for a blank `APP_ENV`); `ruff format --check` and `ruff check` clean
+  - **the secret check, without Docker:** `uv run --directory apps/api python scripts/check_corpus_secrets.py ../../docs` → `corpus secret check: clean`, exit 0. Then put a fake key in a scratch folder (a file `a.md` holding `AKIA` immediately followed by 16 capital letters or digits) and run it on that folder → `a.md:1: looks like aws_access_key_id`, exit 1, and **no part of the key** in the output
+  - **the corpus choice:** `APP_ENV=prod` with a `/app/corpus` directory present reads it; `APP_ENV=local` (or unset or blank) reads the repository's `docs/`; `CORPUS_DIR` wins over both — pinned by `TestCorpusDirectory`
+  - **the image — needs Docker or CI** (I could not build it here): from the repository root `docker build --file apps/api/Dockerfile --tag team-assistant-api .` — the build **fails** at the `corpus` stage if a document holds a secret-looking string (try one in a scratch doc and delete it again) and succeeds otherwise. Then `docker run --rm --entrypoint sh team-assistant-api -c 'id -un; find /app/corpus -name "*.md" | wc -l; ls -ld /app/corpus; ls -a /app'` → `appuser`, 55 (the number of `.md` files under `docs/` today), `root root` on `/app/corpus`, and no `.env` in `/app`. `docker compose build api` works too
+  - prove the tests bite: in the scanner drop a pattern, the allow-list, or the NUL/BOM check; in `ingest.py` ignore the image corpus or use it locally; in the Dockerfile drop the check, ignore its failure, use `\;` instead of `+`, keep hidden files, copy `docs` raw, chown the corpus, drop `USER`, copy an `.env`, or bake `CORPUS_DIR`; in compose, the workflows or `.dockerignore` put the old context or drop `**/.env`: the matching tests fail (41 such changes tried; 2 survived and the tests were tightened until they were caught)
 - **needs_human:**
-  - build the image with Docker (not installed on this machine today; optional tool) or let CI build it — pushing an image is always a human step
-  - accept ADR-0013
+  - build the image with Docker (not installed on this machine) or let CI build it — `ci.yml` builds it on every pull request; pushing an image is always a human step. **Nothing about the Dockerfile has been run**: I checked it by reading, by two reviews, and by running its `find` / `cp` step by hand with GNU tools
+  - **`apps/api/.dockerignore` is no longer read** (the build context is the repository root, so the root `.dockerignore` governs). Deleting it is your call — reply "delete it" and I will remove it, or keep it as it is; I did not touch it
+  - review the workflow edits: `ci.yml` and `infra.yml` now build with `--file apps/api/Dockerfile … .`, `infra.yml` also runs on a push that changes `docs/**`, and its image job checks out with `persist-credentials: false`
   - review whether the corpus scope is right (decision 14: `docs/**/*.md`, including the template's own docs) — the whole corpus becomes searchable by everyone who can use the chat (threat model G7)
 - **notes:**
   - 2026-10-06 — planned. Not needed for local runs; only for a deployed container.
   - 2026-10-06 — from the api 3.1 threat model (G7): secret scan and corpus-scope review added.
+  - 2026-10-09 — started by Claude. ADR-0013 was accepted on 2026-10-07 (the second `needs_human` line is done).
+  - 2026-10-09 — implemented by Claude, awaiting test by Yousef Wahid. Files: `apps/api/Dockerfile` (new `corpus` stage, repo-root context), `apps/api/scripts/check_corpus_secrets.py` (new), `app/ai/ingest.py` (`IMAGE_CORPUS_DIR`, `default_corpus_dir`), `app/config.py` (a blank `APP_ENV` is `local`), `.dockerignore`, `docker-compose.yml`, `.github/workflows/ci.yml` + `infra.yml`, `tests/test_corpus_image.py`, `tests/test_config.py`, `.env.example`, `environment-variables.md`, `ai.md`, `overview.md`, `workflow.md`, `getting-started.md`, `security/README.md`, `template-roadmap.md`, `README.md`, `apps/api/README.md`, `apps/api/CLAUDE.md`, rule 70, `CHANGELOG.md` + `pyproject.toml`/`uv.lock` (0.14.0). Reviews: `code-reviewer` and `security-reviewer`; no CRITICAL.
+  - 2026-10-09 — fixed after review: `find -exec cp \;` would not fail the build on a failed copy (now `-t /corpus {} +`); the corpus was owned by the service user (now root-owned); the root `.dockerignore` had root-anchored cache patterns and no key/certificate files; docs still said each app's `.dockerignore` governs; the scanner missed PGP blocks, Azure shared-access and SAS keys, Slack, Google and Stripe keys, bearer tokens, URL credentials, `password=` assignments and UTF-16 / NUL files (all added, with fake secrets and look-alikes), and had no way to allow the AWS docs' example (an exact-string allow-list now); a blank `APP_ENV` was an empty string, not `local` (found by a test); weak Dockerfile tests tightened.
+  - 2026-10-09 — DECISIONS: the build context is the repository root (a named BuildKit context would need new flags in every caller); the secret check is a stdlib script in the Dockerfile's own stage, so no secret-looking document reaches a layer; `/app/corpus` is read only when `APP_ENV` is not `local` (as the acceptance says), so an api run by `docker compose` (default `APP_ENV=local`) reads no baked corpus unless `CORPUS_DIR=/app/corpus` is set; version 0.14.0 (MINOR: `docker build apps/api` no longer works, but only CI and compose build it).
+  - 2026-10-09 — not done, recorded: the scanner is line-based, so a secret wrapped over two lines or base64-encoded inside a document is not seen (api 5.7 adds the CI scan, and a maintained tool is preferable to growing these patterns); the corpus is still all of `docs/**/*.md` including the template's own docs (decision 14, the scope review below); `python:3.14-slim` is not pinned by digest; `**/test/` and `**/generated/` in the root `.dockerignore` would silently drop a `docs/**/test/` directory from the corpus (none exists today).
+  - 2026-10-09 — confirmed by Yousef Wahid.
 
 ### 3.5 — Ingest hygiene (paths, sources, stale chunks, timeouts)
 

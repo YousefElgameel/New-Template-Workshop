@@ -151,9 +151,10 @@ owned by `appuser`; shipping the Alembic environment in the image is deliberate,
 run `alembic upgrade head` from the container with `DATABASE_URL` injected at run time — the
 image itself carries no credentials.
 
-`.dockerignore` (root) excludes `node_modules/`, `dist/`, `.next/`, `**/generated/`, `.venv/`,
-`__pycache__/`, `*.pyc`, `.git/`, `**/.env` / `**/.env.*` (while explicitly re-including
-`**/.env.example`), `*.log`, test files, and tool caches — so build contexts don't carry
+`.dockerignore` (root, which governs the api image: it is built from the repository root) excludes `node_modules/`,
+`dist/`, `.next/`, `**/generated/`, `.venv/`, `__pycache__/`, `*.pyc`, `.git/`, `**/.env` / `**/.env.*` (while
+explicitly re-including `**/.env.example`), key and certificate files, `*.log`, test files, the web app, the
+infrastructure and tool caches — so build contexts don't carry
 secrets, dev artifacts, or the git history into an image layer.
 
 ### (h) Telemetry ingestion hardening

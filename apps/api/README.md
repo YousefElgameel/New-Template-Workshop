@@ -82,6 +82,8 @@ feature that calls the AI layer without them raises `AINotConfigured`. Conventio
 ## Docker
 
 ```bash
-docker build -t team-assistant-api .   # build context = apps/api; installs ODBC Driver 18
+# from the REPOSITORY ROOT (the image carries docs/**/*.md as its corpus, /app/corpus):
+docker build --file apps/api/Dockerfile --tag team-assistant-api .   # installs ODBC Driver 18; fails if a doc holds a secret
 docker run -p 8000:8000 team-assistant-api
+# the baked corpus is read when APP_ENV is not `local` (the image default is `prod`) and CORPUS_DIR is not set
 ```

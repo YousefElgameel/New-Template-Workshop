@@ -1,4 +1,5 @@
-# Root .dockerignore (each app also has its own for its build context).
+# Root .dockerignore: governs every build whose context is the repository root, i.e. the api image
+# (`docker build --file apps/api/Dockerfile .`). The web image builds from apps/web, which has its own.
 node_modules/
 **/node_modules/
 dist/
@@ -16,9 +17,22 @@ __pycache__/
 **/.env
 **/.env.*
 !**/.env.example
-*.log
+**/*.pem
+**/*.key
+**/*.pfx
+**/.azure/
+**/*.log
+# The api image is built from the repository root (apps/api/Dockerfile): keep out what it never uses.
+apps/web/
+infra/
+roadmaps/
+.claude/
+.github/
+team-assistant/
+**/coverage/
+**/coverage.xml
 **/*.spec.ts
 **/test/
-.ruff_cache/
-.pytest_cache/
-.cache/
+**/.ruff_cache/
+**/.pytest_cache/
+**/.cache/

@@ -155,13 +155,13 @@ Assumptions (all confirmed by the team on 2026-09-28):
 
 ## Needs a human (cannot be done by an agent)
 
-| ID  | Action                                                                                                                                                                                                         | Blocks                      |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
-| H1  | State storage accounts `st<org>tfstate{dev,stg,prod}` + container `tfstate`; SP role assignments; GitHub Environments + secrets (2.14).                                                                        | 2.11, 3.8                   |
-| H2a | Build the api image once Docker is available (`docker build apps/api`) to prove the ODBC Driver 18 install step — the daemon was not running on the authoring machine, so the Dockerfile change is unverified. | Phase 3 image, 3.8          |
-| H2  | First `terraform apply` for `envs/dev` (observability, Key Vault, Azure SQL, ACR, Container Apps, Foundry, AI Search) — by the pipeline or locally.                                                            | 3.x onwards                 |
-| H3  | Create the api's contained database user (`FROM EXTERNAL PROVIDER`) and the read-only login on the external database; put `DATABASE_URL` / `EXTERNAL_DATABASE_URL` into Key Vault; Foundry deployment quota.   | 3.3, 3.9, 4.x               |
-| H4  | Developer IPs for the dev SQL firewall (3.10).                                                                                                                                                                 | autogenerate, introspection |
+| ID  | Action                                                                                                                                                                                                                                                       | Blocks                      |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| H1  | State storage accounts `st<org>tfstate{dev,stg,prod}` + container `tfstate`; SP role assignments; GitHub Environments + secrets (2.14).                                                                                                                      | 2.11, 3.8                   |
+| H2a | Build the api image once Docker is available (`docker build --file apps/api/Dockerfile .`, from the repository root) to prove the ODBC Driver 18 install step — the daemon was not running on the authoring machine, so the Dockerfile change is unverified. | Phase 3 image, 3.8          |
+| H2  | First `terraform apply` for `envs/dev` (observability, Key Vault, Azure SQL, ACR, Container Apps, Foundry, AI Search) — by the pipeline or locally.                                                                                                          | 3.x onwards                 |
+| H3  | Create the api's contained database user (`FROM EXTERNAL PROVIDER`) and the read-only login on the external database; put `DATABASE_URL` / `EXTERNAL_DATABASE_URL` into Key Vault; Foundry deployment quota.                                                 | 3.3, 3.9, 4.x               |
+| H4  | Developer IPs for the dev SQL firewall (3.10).                                                                                                                                                                                                               | autogenerate, introspection |
 
 ## Suggested order
 

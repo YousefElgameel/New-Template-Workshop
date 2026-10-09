@@ -126,7 +126,9 @@ KQL) · [security](docs/security/README.md) · [ADRs](docs/adr/README.md).
 ```
 
 Each app is an **independent package** with its **own lockfile** (so
-`docker build apps/<svc>` is individually buildable and reproducible) — there is
+`docker build apps/web` is individually buildable and reproducible; the api image is built
+from the repository root, `docker build --file apps/api/Dockerfile .`, because it carries `docs/**/*.md` as
+its corpus — ADR-0013) — there is
 no pnpm workspace.
 
 ---

@@ -7,10 +7,11 @@ fields ``id`` (key), ``content`` (searchable), ``source`` (filterable, the ``doc
 wide). ``ensure_index`` is idempotent, and it **refuses** to touch an index whose vector size
 differs from the configured one — it never reuses or recreates it silently.
 
-The corpus is every ``.md`` file under one directory (decision 14): ``CORPUS_DIR`` when set
-(``/app/corpus`` in the image, ADR-0013), else the repository's ``docs/``. A document's
-``source`` is always ``docs/<path inside that directory>``, so citations read the same locally
-and in the container.
+The corpus is every ``.md`` file under one directory (decision 14): ``CORPUS_DIR`` when set, else
+``/app/corpus`` when ``APP_ENV`` is not ``local`` and the image put one there (the repository's
+``docs/**/*.md``, checked for secrets at build time, ADR-0013), else the repository's ``docs/``.
+A document's ``source`` is always ``docs/<path inside that directory>``, so citations read the
+same locally and in the container.
 
 The corpus is untrusted input (threat model T3, G3, G6), so the load is defensive: a file whose
 resolved path leaves the corpus root (a symlink, ``..``) is skipped and counted, never read; a file
@@ -72,6 +73,7 @@ from app.ai.tools.retrieve import (
     build_search_client,
     build_search_credential,
 )
+from app.config import get_settings
 from app.logging_config import configure_logging, get_logger
 
 CHUNK_INDEX_FIELD = "chunk_index"
@@ -486,8 +488,16 @@ async def check_embedding_dimensions(
         raise EmbeddingDimensionMismatch(len(vector), expected)
 
 
+# Where the api image keeps its corpus (``apps/api/Dockerfile``, ADR-0013): the repo's docs, as .md.
+IMAGE_CORPUS_DIR = Path("/app/corpus")
+
+
 def default_corpus_dir() -> Path:
-    """The repository's ``docs/`` (found from this file), else ``./docs``."""
+    """Where the corpus is when ``CORPUS_DIR`` is not set: ``/app/corpus`` when the environment is
+    not ``local`` and the image put one there; otherwise the repository's ``docs/`` (found from
+    this file), else ``./docs``."""
+    if get_settings().app_env != "local" and IMAGE_CORPUS_DIR.is_dir():
+        return IMAGE_CORPUS_DIR
     try:
         candidate = Path(__file__).resolve().parents[4] / "docs"
     except IndexError:  # the installed image has a shallower tree

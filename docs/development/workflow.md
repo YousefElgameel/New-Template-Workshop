@@ -11,7 +11,8 @@ decision needs an ADR.
 The repo is a **polyglot monorepo of two independent packages** — `apps/web` (Next.js BFF +
 UI) and `apps/api` (FastAPI + SQLAlchemy 2 async + Alembic). There is **no pnpm workspace
 and no Turborepo**. Each app has its own lockfile, its own `Dockerfile`, and its own version, so
-`docker build apps/<svc>` is individually buildable and reproducible.
+each image is individually buildable and reproducible (`docker build apps/web`; the api from the repository
+root, `docker build --file apps/api/Dockerfile .`, because its image carries `docs/**/*.md` as the corpus).
 
 That single decision has consequences you hit daily:
 

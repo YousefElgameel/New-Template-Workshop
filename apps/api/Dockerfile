@@ -1,8 +1,12 @@
 # syntax=docker/dockerfile:1
 # =============================================================================
-# team-assistant-api — multi-stage build (build context = apps/api).
+# team-assistant-api — multi-stage build. BUILD CONTEXT = THE REPOSITORY ROOT:
+# the image carries the repo's docs/**/*.md as its corpus (/app/corpus, ADR-0013),
+# and docs/ is not inside apps/api. Build it from the repo root:
+#   docker build --file apps/api/Dockerfile --tag team-assistant-api .
+# (`docker compose build api` does the same; the root .dockerignore applies.)
 # uv is installed via pip (pinned) so the build does not depend on an external
-# container registry. Runtime carries only the synced venv + app code.
+# container registry. Runtime carries only the synced venv + app code + corpus.
 # =============================================================================
 
 # --- Stage 1: build the venv from the lockfile ------------------------------
@@ -20,8 +24,8 @@ WORKDIR /app
 
 # 1) Install dependencies only (no project) for maximal layer caching.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=apps/api/uv.lock,target=uv.lock \
+    --mount=type=bind,source=apps/api/pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --no-dev --no-build
 
 # 2) Add the project source and install the project itself.
@@ -30,11 +34,26 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # deps were already installed wheel-only with `--no-build` in step 1, so no
 # untrusted setup scripts execute here. (`--no-build` would error: the local
 # editable project "has no binary distribution".)
-COPY . /app
+COPY apps/api /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-# --- Stage 2: lean runtime image --------------------------------------------
+# --- Stage 2: the corpus, checked for secrets before it can be copied --------
+# Only the .md files of docs/ (no hidden file or directory, no symlink) are kept,
+# laid out as the ingest job reads them: /corpus/<path inside docs>, whose
+# `source` becomes docs/<path>. A secret-looking string in any of them fails the
+# build here: the check prints the file, line and kind of pattern, never the text.
+FROM python:3.14-slim AS corpus
+WORKDIR /work
+COPY apps/api/scripts/check_corpus_secrets.py /work/check_corpus_secrets.py
+COPY docs /work/docs
+RUN mkdir /corpus \
+ && cd /work/docs \
+ && find . -type f -name '*.md' -not -path '*/.*' -exec cp --parents -t /corpus {} + \
+ && test -n "$(ls -A /corpus)" \
+ && python /work/check_corpus_secrets.py /corpus
+
+# --- Stage 3: lean runtime image --------------------------------------------
 FROM python:3.14-slim AS runtime
 
 # Use the project's venv directly (no uv needed at runtime).
@@ -67,12 +86,16 @@ WORKDIR /app
 
 # Copy the synced venv and the application code.
 COPY --from=builder --chown=appuser:app /app/.venv /app/.venv
-COPY --chown=appuser:app app /app/app
+COPY --chown=appuser:app apps/api/app /app/app
 # Alembic toolchain ships in the image so a HUMAN can run migrations from it
 # (e.g. `docker run --rm -e DATABASE_URL=... team-assistant-api alembic upgrade head`).
 # The service itself never runs migrations; CMD is unchanged.
-COPY --chown=appuser:app alembic.ini /app/alembic.ini
-COPY --chown=appuser:app alembic /app/alembic
+COPY --chown=appuser:app apps/api/alembic.ini /app/alembic.ini
+COPY --chown=appuser:app apps/api/alembic /app/alembic
+# The corpus the ingest job reads when APP_ENV is not `local` (app/ai/ingest.py,
+# IMAGE_CORPUS_DIR). Root-owned and world-readable on purpose: the service reads it and
+# cannot rewrite what the next ingest run would embed.
+COPY --from=corpus /corpus /app/corpus
 
 USER appuser
 
