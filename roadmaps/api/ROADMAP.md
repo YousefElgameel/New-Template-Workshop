@@ -249,7 +249,7 @@ need a human with access._
 
 ### 3.3 — Ingest endpoint
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [3.1, 3.2, 3.5]
 - **layers:** [endpoint, ai]
 - **acceptance:**
@@ -265,11 +265,20 @@ need a human with access._
   - an unexpected failure of the background run is reported by a bounded error kind in the log and the outcome event, never by the exception text (which can carry service URLs or response bodies)
   - the corpus has a size cap: a run over 1,000 files or 50 MB in total refuses before it embeds anything (a clear one-line reason, nothing uploaded or removed); the numbers are configurable and documented (threat model decision G7)
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `uv run --directory apps/api pytest` — expect **927 passed, 4 skipped** (new: `tests/test_admin_ingest.py`, 67 tests); `ruff format --check` and `ruff check` clean; `docs/reference/openapi.json` current (`tests/test_openapi_export.py`)
+  - **the guard, offline** (no Azure needed): put `INGEST_ADMIN_KEY=<40 random characters>` in your own `apps/api/.env`, run the api (`uv run --directory apps/api uvicorn app.main:app`), then
+    - `curl -si -X POST localhost:8000/v1/admin/ingest` → `401 {"error":"unauthorized","trace_id":"0c70…"}` and the same id in `x-trace-id`
+    - the same with `-H "x-admin-key: wrong"` → `401`; with a key of 31 characters in `.env` (and that key in the header) → `401` and ONE log line `admin key is not usable…` with `reason: too_short` (no key, no length); with the key unset → `401` and `reason: not_set`
+    - repeat a wrong key 20 times in a minute → one `admin call refused` log line, not twenty
+    - with the right key but **no** Azure settings → `503 {"error":"ai_unavailable",…}` and nothing started
+  - **a real run** (needs the dev Azure settings, see `needs_human`): `curl -si -X POST -H "x-admin-key: $INGEST_ADMIN_KEY" localhost:8000/v1/admin/ingest` → `202 {"status":"started"}` at once; a second call within the run → `409 {"error":"ingest_running",…}`; the log then shows `ingest finished` with counts and seconds (no text, no paths) and one `ingest.completed` event (`outcome: success`); check the index has the chunks
+  - **the size cap:** `INGEST_MAX_FILES=1 INGEST_MAX_BYTES=1000 uv run --directory apps/api python -m app.ai.ingest` → exit 2 with one line `ingest stopped: the corpus is too large: … over the cap of 1 (INGEST_MAX_FILES) …`, nothing uploaded
+  - **not behind the BFF:** `curl -si -X POST localhost:3000/api/v1/admin/ingest` (web running) → `404`
+  - prove the tests bite: in `app/admin.py` drop the length check, compare with `==`, drop the throttle; in `routers/admin.py` drop the `dependencies=[…]` or the config checks; in `ingest_job.py` drop the lock check, a kind, or log `str(exc)`; in `ingest.py` make a cap `>=` or run the scan/index setup on the loop; in `logging_config.py` drop one of the three names: the matching tests fail (28 such changes tried, all caught; the one that "survived" was logging the text under the key `message`, which structlog overwrites)
 - **needs_human:**
-  - set a real `INGEST_ADMIN_KEY` in your own `.env` (and Key Vault when deployed)
-  - run the first ingestion against dev (`curl -X POST -H "x-admin-key: …" localhost:8000/v1/admin/ingest`) and check the index is populated
-  - accept ADR-0015
+  - set a real `INGEST_ADMIN_KEY` (at least 32 random characters) in your own `.env` — I did not read or write any `.env`; for a deployed environment the key and its Container App wiring **do not exist in `infra/` yet**: the use-case Key Vault secret + the api Container App env entry (value never in a parameter file) need an infra roadmap item, and until then a deployed api answers `401` to everyone
+  - run the first ingestion against dev (`curl -X POST -H "x-admin-key: …" localhost:8000/v1/admin/ingest`) and check the index is populated; needs the Azure AI and Search settings in your `.env`
+  - on the first real failure, check in Application Insights that no span of the Search/embedding call carries the exception text (endpoint URLs, response bodies): I verified the log and the event only; the Azure SDK and `httpx` spans were not tested against a real failure
   - decide whether the runtime and the ingest job use separate Search identities (threat model G13: runtime = Search Index Data Reader, ingest = Contributor); if yes, an entry for the cloud team in `infra/grant-request.md`
 - **notes:**
   - 2026-10-06 — planned. Delegate to `observability-instrumenter` for the event.
@@ -277,6 +286,13 @@ need a human with access._
   - 2026-10-06 — from the api 3.2 security review: the CLI prints a traceback for unexpected errors, which is fine for a person at a terminal; the endpoint must not.
   - 2026-10-07 — proposed decisions of the threat model §8a (Claude, on Yousef Wahid's instruction to decide; ADR-0015 is still for him to accept): the corpus-size cap above was added (G7); the runtime and the ingest job use separate Search identities in the deployed environment (G13) — a request for the cloud team, not authored here.
   - 2026-10-07 — from the api 4.2 security review: the api has no request-size cap (item 5.5); the ingest route takes no body, so it is not affected, but any admin route added later should not rely on the BFF to cap sizes.
+  - 2026-10-09 — started by Claude. ADR-0015 was accepted on 2026-10-07 (the first `needs_human` line below is done).
+  - 2026-10-09 — implemented by Claude, awaiting test by Yousef Wahid. Files: `app/admin.py` (the key guard), `app/routers/admin.py`, `app/ai/ingest_job.py` (the background run, lock, outcome), `app/ai/ingest.py` (`run()` split into `ingest_corpus()`; corpus cap; scan and index setup in worker threads), `app/ai/config.py` (`INGEST_MAX_FILES`, `INGEST_MAX_BYTES`), `app/logging_config.py` (3 names), `app/routers/v1.py`, `tests/test_admin_ingest.py`, the regenerated `docs/reference/openapi.json` + `apps/web/src/lib/api-types.ts`, `.env.example`, `docker-compose.yml`, `environment-variables.md`, `http-api.md`, `ai.md`, `apps/api/CLAUDE.md`, rule 70, the new runbook `rotate-ingest-admin-key.md`, `CHANGELOG.md` + `pyproject.toml`/`uv.lock` (0.13.0). Reviews: `code-reviewer` and `security-reviewer`; no CRITICAL/HIGH.
+  - 2026-10-09 — fixed after review: the corpus scan and the index setup ran on the event loop (now in worker threads); refused calls were logged one line per request (now once a minute per reason, with the count left out); a cancelled run reported as `unexpected` (now `cancelled`); a failing reporter could end the task with an exception (now swallowed); the cap's message named a cap that was not set (now only the one exceeded); a test-only parameter removed from `start()`; weak and order-dependent tests tightened (structlog state restored, trace id on the outcome line asserted).
+  - 2026-10-09 — DECISIONS: the 50 MB cap is 50 MiB (52,428,800 bytes); the endpoint answers `503 ai_unavailable` before starting when Search or embeddings are not configured (a failure minutes later in a log is worse); a refusal is logged at most once a minute per reason; the key's minimum length is a length rule only (no entropy check).
+  - 2026-10-09 — not done, recorded: (1) the key has no deployed path — an infra item (Key Vault secret, Container App env entry, no value in params) is needed, and the runbook says so; (2) the lock is per process (api 5.2); `infra/` should keep the api at one replica until then; (3) the cap pass reads sizes first and the files later, so a file that grows in between is limited only by the per-file cap (2 MB) — it needs write access to the corpus directory; (4) a web test that no `admin` route is ever added to the BFF; (5) the runbook's multi-revision caveat and the unverified span text (see `needs_human`); (6) the G13 separate Search identity.
+  - 2026-10-09 — version 0.13.0 (MINOR: a new endpoint and settings; the command is unchanged).
+  - 2026-10-09 — confirmed by Yousef Wahid.
 
 ### 3.4 — Corpus baked into the api image
 

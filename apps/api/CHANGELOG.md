@@ -7,6 +7,51 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-09
+
+### Added
+
+- **`POST /v1/admin/ingest`** (roadmap api 3.3, [ADR-0015](../../docs/adr/0015-admin-key-for-ingest.md)): starts an
+  ingestion run of the corpus in the background and answers `202 { "status": "started" }`. A second call while a run is
+  in progress is `409 ingest_running` (in this process; one replica). Search or the embedding deployment not configured
+  is `503 ai_unavailable`, before anything starts. **Not exposed through the web BFF.** Documented in
+  `docs/reference/http-api.md`; the OpenAPI contract and the web's generated types are regenerated.
+  - **Guarded by `x-admin-key`** = `INGEST_ADMIN_KEY`, compared in constant time (both sides hashed first). A missing
+    or wrong key is `401 unauthorized`; so is **an unset key or one shorter than 32 characters** (it fails closed), with
+    one warning per process that names the reason kind only. The key and its length are never logged;
+    `x_admin_key`, `admin_key` and `ingest_admin_key` are on the log redaction list.
+  - **The outcome** is one log line (`ingest finished` / `ingest failed`) and one `ingest.completed` custom event:
+    `outcome` (`success` · `partial` · `error`), a bounded `error_kind`, counts and seconds. A failure is reported by its
+    kind only — never the exception's message (it can carry service URLs or response bodies) and never a traceback — and
+    a document's text or path is never in it.
+  - **A corpus size cap** (threat model G7): more than `INGEST_MAX_FILES` (1000) `.md` files, or more than
+    `INGEST_MAX_BYTES` (50 MiB) in total, is refused before any file is read or anything embedded, with a one-line
+    reason that names the cap that was exceeded. It applies to the command (`python -m app.ai.ingest`) too. Every
+    `.md` counts, including one a later check skips, and a link counts by its target's size: it errs on refusing.
+  - **The run does not block the api:** the corpus scan and the index setup run in worker threads, so asks, health
+    probes and the rest keep being served while a run is in progress.
+  - A refused call is logged at most **once a minute per reason** (with the count of the ones left out), so a caller
+    without the key cannot fill the log; `error_kind` also has `cancelled`.
+- A runbook to rotate the key: `docs/operations/runbooks/rotate-ingest-admin-key.md`.
+- `INGEST_ADMIN_KEY`, `INGEST_MAX_FILES` and `INGEST_MAX_BYTES` in `.env.example`, `docker-compose.yml` and
+  `docs/reference/environment-variables.md`.
+
+### Changed
+
+- `app.ai.ingest.run()` is split: `ingest_corpus()` is the whole run (what the command and the endpoint call), `run()`
+  only parses the command line. The command's behaviour, output and exit codes are unchanged; the message of a refused
+  prune is now carried on the report (`removal_refusal`) and printed by `run()`.
+
+### Known limits
+
+- The corpus cap is checked from a first pass over file sizes; a file that grows between that pass and its read is still
+  limited by the per-file size cap (2 MB), not by the total. Writing to the corpus directory is needed for that, and it
+  is baked into the image.
+- Whether the Azure SDK or `httpx` spans of a failing run record the exception message (endpoint URLs, response bodies)
+  has not been verified against a real failure; the log and the event never carry it.
+- The lock is per process: with several replicas each can run one (api 5.2 makes it work across replicas).
+- One shared key, no per-person audit trail, no expiry, no rate limit on wrong keys — the stop-gap of ADR-0015 until auth.
+
 ## [0.12.0] — 2026-10-07
 
 ### Changed

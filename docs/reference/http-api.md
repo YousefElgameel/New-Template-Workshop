@@ -16,24 +16,25 @@ removed in [ADR-0003](../adr/0003-remove-nestjs-api-layer.md).
 
 ## Route map
 
-| Method | Path                                    | Service          | Purpose                                             | Versioned?       |
-| ------ | --------------------------------------- | ---------------- | --------------------------------------------------- | ---------------- |
-| GET    | `/ping`                                 | `apps/api`       | Liveness greeting                                   | No (operational) |
-| GET    | `/info`                                 | `apps/api`       | Status/version/runtime report                       | No (operational) |
-| GET    | `/health`                               | `apps/api`       | Health + observability state                        | No (operational) |
-| POST   | `/v1/conversations`                     | `apps/api`       | Start a conversation                                | Yes (`/v1`)      |
-| GET    | `/v1/conversations`                     | `apps/api`       | List conversations, newest first                    | Yes (`/v1`)      |
-| GET    | `/v1/conversations/{id}`                | `apps/api`       | Open a conversation with its messages               | Yes (`/v1`)      |
-| POST   | `/v1/conversations/{id}/ask`            | `apps/api`       | Ask a question; the answer cites the docs           | Yes (`/v1`)      |
-| POST   | `/v1/conversations/{id}/ask/stream`     | `apps/api`       | Ask a question; the answer streams in (SSE)         | Yes (`/v1`)      |
-| GET    | `/api/v1/conversations`                 | `apps/web` (BFF) | Proxies `GET /v1/conversations`                     | Yes (`/api/v1`)  |
-| POST   | `/api/v1/conversations`                 | `apps/web` (BFF) | Proxies `POST /v1/conversations` (body ≤ 4 KB)      | Yes (`/api/v1`)  |
-| GET    | `/api/v1/conversations/[id]`            | `apps/web` (BFF) | Proxies `GET /v1/conversations/{id}`                | Yes (`/api/v1`)  |
-| POST   | `/api/v1/conversations/[id]/ask`        | `apps/web` (BFF) | Proxies `POST /v1/conversations/{id}/ask`           | Yes (`/api/v1`)  |
-| POST   | `/api/v1/conversations/[id]/ask/stream` | `apps/web` (BFF) | Proxies `…/ask/stream` (SSE, unchanged)             | Yes (`/api/v1`)  |
-| GET    | `/api/ping-backend`                     | `apps/web` (BFF) | Proxies `apps/api` `/ping`                          | No (demo route)  |
-| GET    | `/api/info-backend`                     | `apps/web` (BFF) | Proxies `apps/api` `/info`                          | No (demo route)  |
-| GET    | `/health`                               | `apps/web` (BFF) | Own health + observability state (no upstream call) | No (operational) |
+| Method | Path                                    | Service          | Purpose                                                | Versioned?       |
+| ------ | --------------------------------------- | ---------------- | ------------------------------------------------------ | ---------------- |
+| GET    | `/ping`                                 | `apps/api`       | Liveness greeting                                      | No (operational) |
+| GET    | `/info`                                 | `apps/api`       | Status/version/runtime report                          | No (operational) |
+| GET    | `/health`                               | `apps/api`       | Health + observability state                           | No (operational) |
+| POST   | `/v1/conversations`                     | `apps/api`       | Start a conversation                                   | Yes (`/v1`)      |
+| GET    | `/v1/conversations`                     | `apps/api`       | List conversations, newest first                       | Yes (`/v1`)      |
+| GET    | `/v1/conversations/{id}`                | `apps/api`       | Open a conversation with its messages                  | Yes (`/v1`)      |
+| POST   | `/v1/conversations/{id}/ask`            | `apps/api`       | Ask a question; the answer cites the docs              | Yes (`/v1`)      |
+| POST   | `/v1/conversations/{id}/ask/stream`     | `apps/api`       | Ask a question; the answer streams in (SSE)            | Yes (`/v1`)      |
+| POST   | `/v1/admin/ingest`                      | `apps/api`       | Start an ingestion run (`x-admin-key`; not in the BFF) | Yes (`/v1`)      |
+| GET    | `/api/v1/conversations`                 | `apps/web` (BFF) | Proxies `GET /v1/conversations`                        | Yes (`/api/v1`)  |
+| POST   | `/api/v1/conversations`                 | `apps/web` (BFF) | Proxies `POST /v1/conversations` (body ≤ 4 KB)         | Yes (`/api/v1`)  |
+| GET    | `/api/v1/conversations/[id]`            | `apps/web` (BFF) | Proxies `GET /v1/conversations/{id}`                   | Yes (`/api/v1`)  |
+| POST   | `/api/v1/conversations/[id]/ask`        | `apps/web` (BFF) | Proxies `POST /v1/conversations/{id}/ask`              | Yes (`/api/v1`)  |
+| POST   | `/api/v1/conversations/[id]/ask/stream` | `apps/web` (BFF) | Proxies `…/ask/stream` (SSE, unchanged)                | Yes (`/api/v1`)  |
+| GET    | `/api/ping-backend`                     | `apps/web` (BFF) | Proxies `apps/api` `/ping`                             | No (demo route)  |
+| GET    | `/api/info-backend`                     | `apps/web` (BFF) | Proxies `apps/api` `/info`                             | No (demo route)  |
+| GET    | `/health`                               | `apps/web` (BFF) | Own health + observability state (no upstream call)    | No (operational) |
 
 Business endpoints are `/v1/<feature>` on the api (routers attached to `v1_router`) and
 `/api/v1/<feature>` on web (folder-enforced). See [Versioning](#versioning).
@@ -294,6 +295,32 @@ data: {"message_id": "9c1e…", "input_tokens": 812, "output_tokens": 14, "citat
 - No question, answer, passage, title or id is written to a log, a span or a metric. A database error while storing
   the answer is caught and reported as `internal_error` / `persist_failed`; it is never raised after the response
   has started, because the server span would record its text.
+
+---
+
+### `POST /v1/admin/ingest` — start an ingestion run
+
+Source: `apps/api/app/routers/admin.py`, `app/admin.py`, `app/ai/ingest_job.py` (roadmap api 3.3,
+[ADR-0015](../adr/0015-admin-key-for-ingest.md)). **Not exposed through the web BFF**: the BFF has explicit routes and
+no catch-all, so nothing in the browser path reaches `/v1/admin`. No body.
+
+```bash
+curl -X POST -H "x-admin-key: $INGEST_ADMIN_KEY" http://localhost:8000/v1/admin/ingest
+```
+
+| Status | Body                                        | When                                                                                                                  |
+| ------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `202`  | `{ "status": "started" }`                   | the key is right and a run was started in the background (the corpus of `CORPUS_DIR`, default the repo's `docs/`)     |
+| `401`  | `{ "error": "unauthorized", "trace_id" }`   | the header is missing or wrong — **or `INGEST_ADMIN_KEY` is not set or shorter than 32 characters** (it fails closed) |
+| `409`  | `{ "error": "ingest_running", "trace_id" }` | a run is already in progress in this process (one replica; a lock across replicas is api 5.2)                         |
+| `503`  | `{ "error": "ai_unavailable", "trace_id" }` | Azure Search or the embedding deployment is not configured — nothing was started                                      |
+
+The key is checked first, so a caller without it only ever learns `401`. The outcome is **not** in the response: the
+run logs `ingest finished` / `ingest failed` and emits one `ingest.completed` custom event — `outcome`
+(`success` · `partial` · `error`), `error_kind` (`none` · `corpus_not_found` · `corpus_empty` · `corpus_too_large` ·
+`corpus_unreadable` · `timeout` · `cancelled` · `dimension_mismatch` · `index_shape` · `not_configured` · `ingest_error` ·
+`unexpected`), counts and seconds — never a document's text, a path, or an exception's message. A corpus over
+`INGEST_MAX_FILES` / `INGEST_MAX_BYTES` is refused before anything is embedded.
 
 ---
 

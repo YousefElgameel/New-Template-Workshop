@@ -197,6 +197,18 @@
         "title": "ErrorBody",
         "type": "object"
       },
+      "IngestStarted": {
+        "properties": {
+          "status": {
+            "const": "started",
+            "default": "started",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "IngestStarted",
+        "type": "object"
+      },
       "MessageOut": {
         "properties": {
           "citations": {
@@ -311,6 +323,76 @@
           }
         },
         "summary": "Ping"
+      }
+    },
+    "/v1/admin/ingest": {
+      "post": {
+        "description": "Ingest the corpus; the outcome is in the log and the `ingest.completed` event.",
+        "operationId": "start_ingest_v1_admin_ingest_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Missing, wrong or unset key (`unauthorized`)"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A run is already in progress (`ingest_running`)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_error`)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unhandled error (`internal_error`)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Search or embeddings not configured (`ai_unavailable`)"
+          }
+        },
+        "summary": "Start an ingestion run in the background",
+        "tags": ["admin"]
       }
     },
     "/v1/conversations": {

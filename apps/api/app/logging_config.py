@@ -65,6 +65,10 @@ DEFAULT_REDACTED_FIELDS: frozenset[str] = frozenset(
         "apikey",
         "connection_string",
         "connectionstring",
+        # The admin key of the ingest route (api 3.3): the header, and the variable it is read from.
+        "x_admin_key",
+        "admin_key",
+        "ingest_admin_key",
     }
 )
 

@@ -110,6 +110,29 @@ class CorpusEmpty(IngestError):
     """The corpus directory holds no ``.md`` file."""
 
 
+class CorpusTooLarge(IngestError):
+    """The corpus is over its size cap (threat model G7): refused before any file is read."""
+
+    def __init__(
+        self,
+        files: int,
+        size: int,
+        max_files: int | None = None,
+        max_bytes: int | None = None,
+    ) -> None:
+        self.files, self.size = files, size
+        self.max_files, self.max_bytes = max_files, max_bytes
+        over: list[str] = []
+        if max_files is not None and files > max_files:
+            over.append(f"{files} files, over the cap of {max_files} (INGEST_MAX_FILES)")
+        if max_bytes is not None and size > max_bytes:
+            over.append(f"{size} bytes, over the cap of {max_bytes} (INGEST_MAX_BYTES)")
+        super().__init__(
+            f"the corpus is too large: {' and '.join(over) or 'over its cap'}. "
+            f"Nothing was uploaded or removed"
+        )
+
+
 class IngestTimeout(IngestError):
     """One call of the run took longer than its budget; the run stopped there."""
 
@@ -198,6 +221,8 @@ class IngestReport:
     removed: int = 0
     removal_failed: int = 0
     removal_refused: bool = False
+    # Why nothing was removed when it was refused (counts only), for the command line to print.
+    removal_refusal: str = field(default="", repr=False, compare=False)
     # What the run put in the index (ids), for the stale-chunk pass; not part of the report.
     live_ids: set[str] = field(default_factory=set, repr=False, compare=False)
 
@@ -475,7 +500,12 @@ def resolve_corpus_dir(settings: AISettings | None = None) -> Path:
     return Path(s.corpus_dir) if s.corpus_dir else default_corpus_dir()
 
 
-def scan_corpus(root: Path) -> CorpusLoad:
+def scan_corpus(
+    root: Path,
+    *,
+    max_files: int | None = None,
+    max_bytes: int | None = None,
+) -> CorpusLoad:
     """Every ``.md`` file under ``root`` as a document, sorted by path, and what was skipped.
 
     ``source`` is ``docs/<path inside root>`` (``/`` separators), whatever ``root`` is, so a
@@ -486,6 +516,12 @@ def scan_corpus(root: Path) -> CorpusLoad:
     directory, a hard link, and a file over ``MAX_FILE_BYTES``. A path that cannot be resolved at
     all is counted apart (``skipped_unresolved``) because it is not known to be outside. The text
     that is kept has been through ``clean_text``; ``cleaned`` counts the files that changed by it.
+
+    With ``max_files`` / ``max_bytes`` set, a corpus of more ``.md`` files than that, or whose files
+    add up to more bytes, raises ``CorpusTooLarge`` **before any file is read** (threat model G7);
+    the
+    directory walk itself is not bounded. Every ``.md`` counts, including one that would be skipped
+    later, and a link counts by its target's size: the cap errs on the side of refusing.
     """
     if not root.is_dir():
         raise CorpusNotFound(f"the corpus directory {root} does not exist")
@@ -493,11 +529,26 @@ def scan_corpus(root: Path) -> CorpusLoad:
     docs: list[IngestDocument] = []
     outside = unsafe = unresolved = cleaned = 0
     # Sorted on the posix path, not the Path: Windows compares paths case-insensitively.
-    for file in sorted(
-        (p for p in root.rglob("*") if p.is_file()), key=lambda p: p.relative_to(root).as_posix()
-    ):
-        if file.suffix.lower() != MARKDOWN_SUFFIX:
-            continue
+    candidates = [
+        p
+        for p in sorted(
+            (p for p in root.rglob("*") if p.is_file()),
+            key=lambda p: p.relative_to(root).as_posix(),
+        )
+        if p.suffix.lower() == MARKDOWN_SUFFIX
+    ]
+    if max_files is not None or max_bytes is not None:
+        total = 0
+        for p in candidates:
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass  # counted as unresolved below
+        if (max_files is not None and len(candidates) > max_files) or (
+            max_bytes is not None and total > max_bytes
+        ):
+            raise CorpusTooLarge(len(candidates), total, max_files, max_bytes)
+    for file in candidates:
         try:
             resolved = file.resolve(strict=True)
         except OSError, RuntimeError:  # a loop, a vanished target, an unreadable link
@@ -687,6 +738,105 @@ async def prune_stale(
     return removed, failed
 
 
+def _ensure_index_blocking(settings: AISettings, index: Any) -> None:
+    """The index calls are blocking network I/O: ``ingest_corpus`` runs this in a thread."""
+    ensure_index(build_index_client(settings), index)
+
+
+async def ingest_corpus(
+    *,
+    corpus: Path | None = None,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    overlap: int = DEFAULT_OVERLAP,
+    batch_size: int = 64,
+    force_prune: bool = False,
+    no_prune: bool = False,
+) -> IngestReport:
+    """One whole run: scan the corpus, check the embedding size, ensure the index, upload, prune.
+
+    What the command line (``run``) and ``POST /v1/admin/ingest`` (``app.ai.ingest_job``) both call.
+    Raises ``IngestError`` / ``AINotConfigured`` before it changes anything it should not.
+    """
+    from app.ai.client import get_embeddings
+
+    started = time.perf_counter()
+    log = get_logger("app.ai.ingest")
+    settings = get_ai_settings()
+    settings.require_search()
+    settings.require_embeddings()
+    # Off the event loop: walking and cleaning a cap's worth of files would stall every request.
+    scan = await asyncio.to_thread(
+        scan_corpus,
+        corpus or resolve_corpus_dir(settings),
+        max_files=settings.ingest_max_files,
+        max_bytes=settings.ingest_max_bytes,
+    )
+    if not scan.documents:
+        raise CorpusEmpty("the corpus directory holds no .md file")
+    if not any(chunk_text(d.text, chunk_size, overlap) for d in scan.documents):
+        raise CorpusEmpty(
+            "no document has any text left after cleaning; nothing was uploaded or removed"
+        )
+    log.info(
+        "ingest files read",
+        documents=len(scan.documents),
+        skipped_outside_root=scan.skipped_outside_root,
+        skipped_unsafe=scan.skipped_unsafe,
+        skipped_unresolved=scan.skipped_unresolved,
+        cleaned=scan.cleaned,
+    )
+
+    timeout = settings.retrieval_timeout_seconds
+    embeddings = get_embeddings()
+    # Before the index is touched: a wrong dimension must not create a wrong index.
+    await check_embedding_dimensions(
+        embeddings, settings.embedding_dimensions, timeout_seconds=timeout
+    )
+    index = build_index(settings.search_index or "", settings.embedding_dimensions)
+    await asyncio.to_thread(_ensure_index_blocking, settings, index)
+    search_client = build_search_client(settings)
+    report = await ingest_documents(
+        scan.documents,
+        embeddings=embeddings,
+        search_client=search_client,
+        chunk_size=chunk_size,
+        overlap=overlap,
+        batch_size=batch_size,
+        expected_dimensions=settings.embedding_dimensions,
+        timeout_seconds=timeout,
+    )
+    report.skipped_outside_root = scan.skipped_outside_root
+    report.skipped_unsafe = scan.skipped_unsafe
+    report.skipped_unresolved = scan.skipped_unresolved
+    report.cleaned = scan.cleaned
+    if no_prune:
+        log.info("ingest stale chunks kept", reason="--no-prune")
+    elif report.failed:
+        log.warning("ingest stale chunks kept", reason="some uploads failed")
+    elif scan.skipped_unresolved:
+        # An unresolved file is not in the live set, though it may be a good document: keep chunks.
+        log.warning("ingest stale chunks kept", reason="some files could not be resolved")
+    else:
+        try:
+            report.removed, report.removal_failed = await prune_stale(
+                search_client,
+                live_ids=report.live_ids,
+                timeout_seconds=timeout,
+                force=force_prune,
+            )
+        except PruneRefused as refused:
+            log.warning(
+                "ingest stale chunks kept",
+                reason="too many",
+                stale=refused.stale,
+                total=refused.total,
+            )
+            report.removal_refused = True
+            report.removal_refusal = str(refused)
+    report.seconds = round(time.perf_counter() - started, 2)
+    return report
+
+
 async def run(argv: Sequence[str] | None = None) -> IngestReport:
     parser = argparse.ArgumentParser(prog="python -m app.ai.ingest", description=__doc__)
     parser.add_argument(
@@ -709,78 +859,16 @@ async def run(argv: Sequence[str] | None = None) -> IngestReport:
         help="upload only: do not remove chunks of files that are no longer in the corpus",
     )
     args = parser.parse_args(argv)
-
-    from app.ai.client import get_embeddings
-
-    started = time.perf_counter()
-    log = get_logger("app.ai.ingest")
-    settings = get_ai_settings()
-    settings.require_search()
-    settings.require_embeddings()
-    scan = scan_corpus(args.corpus or resolve_corpus_dir(settings))
-    if not scan.documents:
-        raise CorpusEmpty("the corpus directory holds no .md file")
-    if not any(chunk_text(d.text, args.chunk_size, args.overlap) for d in scan.documents):
-        raise CorpusEmpty(
-            "no document has any text left after cleaning; nothing was uploaded or removed"
-        )
-    log.info(
-        "ingest files read",
-        documents=len(scan.documents),
-        skipped_outside_root=scan.skipped_outside_root,
-        skipped_unsafe=scan.skipped_unsafe,
-        skipped_unresolved=scan.skipped_unresolved,
-        cleaned=scan.cleaned,
-    )
-
-    timeout = settings.retrieval_timeout_seconds
-    embeddings = get_embeddings()
-    # Before the index is touched: a wrong dimension must not create a wrong index.
-    await check_embedding_dimensions(
-        embeddings, settings.embedding_dimensions, timeout_seconds=timeout
-    )
-    index = build_index(settings.search_index or "", settings.embedding_dimensions)
-    ensure_index(build_index_client(settings), index)
-    search_client = build_search_client(settings)
-    report = await ingest_documents(
-        scan.documents,
-        embeddings=embeddings,
-        search_client=search_client,
+    report = await ingest_corpus(
+        corpus=args.corpus,
         chunk_size=args.chunk_size,
         overlap=args.overlap,
         batch_size=args.batch_size,
-        expected_dimensions=settings.embedding_dimensions,
-        timeout_seconds=timeout,
+        force_prune=args.force_prune,
+        no_prune=args.no_prune,
     )
-    report.skipped_outside_root = scan.skipped_outside_root
-    report.skipped_unsafe = scan.skipped_unsafe
-    report.skipped_unresolved = scan.skipped_unresolved
-    report.cleaned = scan.cleaned
-    if args.no_prune:
-        log.info("ingest stale chunks kept", reason="--no-prune")
-    elif report.failed:
-        log.warning("ingest stale chunks kept", reason="some uploads failed")
-    elif scan.skipped_unresolved:
-        # An unresolved file is not in the live set, though it may be a good document: keep chunks.
-        log.warning("ingest stale chunks kept", reason="some files could not be resolved")
-    else:
-        try:
-            report.removed, report.removal_failed = await prune_stale(
-                search_client,
-                live_ids=report.live_ids,
-                timeout_seconds=timeout,
-                force=args.force_prune,
-            )
-        except PruneRefused as refused:
-            log.warning(
-                "ingest stale chunks kept",
-                reason="too many",
-                stale=refused.stale,
-                total=refused.total,
-            )
-            report.removal_refused = True
-            print(f"ingest: {refused}", file=sys.stderr)
-    report.seconds = round(time.perf_counter() - started, 2)
+    if report.removal_refusal:
+        print(f"ingest: {report.removal_refusal}", file=sys.stderr)
     return report
 
 

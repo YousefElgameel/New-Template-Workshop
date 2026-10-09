@@ -24,7 +24,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.errors import ErrorBody
-from app.routers import ask, conversations
+from app.routers import admin, ask, conversations
 
 API_V1_PREFIX = "/v1"
 
@@ -43,3 +43,4 @@ v1_router = APIRouter(
 # Feature routers attach here; each one carries its own sub-prefix.
 v1_router.include_router(conversations.router)  # -> /v1/conversations
 v1_router.include_router(ask.router)  # -> /v1/conversations/{id}/ask
+v1_router.include_router(admin.router)  # -> /v1/admin/ingest (x-admin-key; not behind the BFF)

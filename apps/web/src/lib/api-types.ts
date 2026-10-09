@@ -67,6 +67,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/admin/ingest': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start an ingestion run in the background
+     * @description Ingest the corpus; the outcome is in the log and the `ingest.completed` event.
+     */
+    post: operations['start_ingest_v1_admin_ingest_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/conversations': {
     parameters: {
       query?: never;
@@ -270,6 +290,15 @@ export interface components {
        */
       trace_id: string;
     };
+    /** IngestStarted */
+    IngestStarted: {
+      /**
+       * Status
+       * @default started
+       * @constant
+       */
+      status: 'started';
+    };
     /** MessageOut */
     MessageOut: {
       /**
@@ -366,6 +395,71 @@ export interface operations {
           'application/json': {
             [key: string]: string;
           };
+        };
+      };
+    };
+  };
+  start_ingest_v1_admin_ingest_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IngestStarted'];
+        };
+      };
+      /** @description Missing, wrong or unset key (`unauthorized`) */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
+        };
+      };
+      /** @description A run is already in progress (`ingest_running`) */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
+        };
+      };
+      /** @description Validation failed (`validation_error`) */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
+        };
+      };
+      /** @description Unhandled error (`internal_error`) */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
+        };
+      };
+      /** @description Search or embeddings not configured (`ai_unavailable`) */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorBody'];
         };
       };
     };

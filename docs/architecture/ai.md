@@ -140,7 +140,11 @@ by `source`; `--no-prune` turns it off), and every embedding, search and index c
 `AI_RETRIEVAL_TIMEOUT_SECONDS` budget. Run it from `apps/api`:
 `uv run python -m app.ai.ingest [--corpus DIR] [--no-prune|--force-prune]`. The removal refuses (and
 the run exits 1) when it would remove most of the index — a wrong `CORPUS_DIR` — unless
-`--force-prune`. The identity needs _Search Index Data
+`--force-prune`. A corpus of more than `INGEST_MAX_FILES` files or `INGEST_MAX_BYTES` bytes is refused before any
+file is read. The same run is started over HTTP by `POST /v1/admin/ingest` (`x-admin-key`, `app/ai/ingest_job.py`):
+`202` and a background task, one at a time per process (`409 ingest_running`), its outcome a log line and one
+`ingest.completed` event of counts and a bounded error kind (the counts and seconds are measurements, not
+dimensions to group by). The identity needs _Search Index Data
 Contributor_ + _Search Service Contributor_ (granted to the api identity by the `ai-search`
 module; a dev key works locally).
 

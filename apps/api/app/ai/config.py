@@ -34,6 +34,10 @@ DEFAULT_MAX_OUTPUT_TOKENS = 1024
 DEFAULT_RETRIEVAL_TIMEOUT_SECONDS = 30.0
 # Asks that may run at once in this process; one more is refused with 429 (api 4.2).
 DEFAULT_MAX_CONCURRENT_ASKS = 4
+# The corpus a run may read: more than this and the run refuses before it embeds anything (threat
+# model G7). The repository's docs/ is a few dozen files and a few MB.
+DEFAULT_INGEST_MAX_FILES = 1000
+DEFAULT_INGEST_MAX_BYTES = 50 * 1024 * 1024
 # text-embedding-3-small / ada-002 produce 1536-dimensional vectors; large = 3072.
 DEFAULT_EMBEDDING_DIMENSIONS = 1536
 
@@ -100,6 +104,9 @@ class AISettings:
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     retrieval_timeout_seconds: float = DEFAULT_RETRIEVAL_TIMEOUT_SECONDS
     max_concurrent_asks: int = DEFAULT_MAX_CONCURRENT_ASKS
+    # The corpus size cap of an ingestion run (api 3.3): files, and bytes in total.
+    ingest_max_files: int = DEFAULT_INGEST_MAX_FILES
+    ingest_max_bytes: int = DEFAULT_INGEST_MAX_BYTES
 
     @property
     def worst_case_seconds(self) -> float:
@@ -190,4 +197,6 @@ def get_ai_settings() -> AISettings:
         max_concurrent_asks=_positive_int_env(
             "AI_MAX_CONCURRENT_ASKS", DEFAULT_MAX_CONCURRENT_ASKS
         ),
+        ingest_max_files=_positive_int_env("INGEST_MAX_FILES", DEFAULT_INGEST_MAX_FILES),
+        ingest_max_bytes=_positive_int_env("INGEST_MAX_BYTES", DEFAULT_INGEST_MAX_BYTES),
     )
