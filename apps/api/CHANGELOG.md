@@ -7,6 +7,51 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-09
+
+### Added
+
+- **A CI job that scans the corpus for credentials** (roadmap api 5.7, threat model G7): `Corpus secret scan` in
+  `.github/workflows/ci.yml` runs `python apps/api/scripts/check_corpus_secrets.py --include '*.md' docs` on every pull
+  request and push, with a 10-minute limit, no git credential kept and no dependency to install. The same script already
+  gates the api image build (api 3.4), so a secret in a document is stopped before it can be merged and again before it
+  can be shipped. A match prints the file, the line and the kind of pattern, never the value (a test checks every kind).
+- **An allow-list file**, `apps/api/scripts/corpus-secrets-allowlist.txt`, for known fake values, replacing the list that
+  was in the script: `<kind> <exact value>` lines, each tied to the kind it silences, at least 8 characters, the value
+  must be what its kind matches (a stale entry or a typo is refused), and a fixed-header kind (`private_key_block`) cannot
+  be listed because one entry would switch it off everywhere. `.github/CODEOWNERS` now names the scanner, the list, the
+  workflows and `docs/security/`. `--allowlist FILE` reads another; a missing, unreadable or bad file (also the default
+  one) is exit 2, never "allow everything" and never a traceback.
+- **New kinds:** a connection-string password (`Password=value`, `Pwd='value'`, `PWD={value}`), a long random-looking
+  value next to `secret`, `token`, `password` or `key` (32 or more characters, Shannon entropy of at least 4 bits a
+  character), an Azure AD client secret (`...8Q~...`), and `symlink`, `line_too_long` and `not_plain_text` for what cannot
+  be scanned as a document. `--include GLOB` limits the scan to matching file names (CI uses `'*.md'`).
+
+### Changed
+
+- **The scan reads a document the way ingestion will index it** as well as the way it is written: control, format and
+  invisible characters and `<!-- comments -->` removed (`as_indexed`, tested to equal `ingest.clean_text`), so a secret
+  split by a zero-width character, a tag character or a comment, and put back together by ingestion, is found. Lines are
+  split on `\n` only, not on Unicode line separators.
+- **Names and decoration:** `DB_PASSWORD`, `OPENAI_API_KEY`, `SECRET_KEY` and `AZURE_CLIENT_SECRET` are names (the keyword
+  no longer needs a word boundary before it); markdown decoration between a name and its value (backticks, bold, quotes,
+  a table pipe) no longer hides it; `~` and `.` are value characters; quoted and braced connection-string passwords and a
+  `$` inside a URL password are found.
+- **Placeholders are skipped only when they are the whole value** (`<your-key>`, `${KEY}`, `$KEY`, `***`, `changeme`, `xxxx`,
+  `your`): `your-<random>`, `example-<random>` or `dummy.<random>` is a finding.
+- **Bounded work:** the one quadratic pattern is fixed, a line over 20,000 characters is refused as `line_too_long` instead of
+  scanned, and a test times hostile lines for every pattern.
+- A file name is printed escaped (a name with a newline could start a CI workflow command), an unknown or abbreviated
+  option is rejected without echoing what was typed, and `--include` is case-sensitive like ingestion.
+- The image build's scan is stricter by all of the above; the repository's own `docs/` pass, and a test runs the scan on them.
+
+### Known limits
+
+- A secret wrapped over two lines or base64-encoded inside a document is not seen; `Password = value` with spaces is read as
+  prose; the patterns are hand-written (a maintained scanner would be a new tool and an ADR). A pull request can change the
+  workflow, the script or the allow-list: the control that binds is CODEOWNERS review and a **required** `Corpus secret scan`
+  check on the protected branches, both repository settings (see the roadmap item).
+
 ## [0.15.0] — 2026-10-09
 
 ### Changed

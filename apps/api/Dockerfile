@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # build here: the check prints the file, line and kind of pattern, never the text.
 FROM python:3.14-slim AS corpus
 WORKDIR /work
-COPY apps/api/scripts/check_corpus_secrets.py /work/check_corpus_secrets.py
+COPY apps/api/scripts/check_corpus_secrets.py apps/api/scripts/corpus-secrets-allowlist.txt /work/
 COPY docs /work/docs
 RUN mkdir /corpus \
  && cd /work/docs \

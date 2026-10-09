@@ -143,6 +143,26 @@ jobs:
           fi
           echo "OK: $(echo "$code" | grep -c . || true) code file(s), $(echo "$tests" | grep -c . || true) test file(s) changed."
 
+  # -- 2b) Corpus secret scan ---------------------------------------------------
+  #     docs/**/*.md is what the assistant answers from, so a credential pasted into a
+  #     document would be indexed and quotable (threat model G7). The same script the api
+  #     image build runs on the corpus (apps/api/scripts/check_corpus_secrets.py) fails
+  #     the job with the file, line and KIND of each match, never the value. Known fake
+  #     values go in apps/api/scripts/corpus-secrets-allowlist.txt, in a reviewed change.
+  #     Standard library only: no dependency to install.
+  corpus-secrets:
+    name: Corpus secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.14' }
+      - name: Scan docs/**/*.md for credentials
+        run: python apps/api/scripts/check_corpus_secrets.py --include '*.md' docs
+
   # -- 3) Tests + coverage (the CI gate) ---------------------------------------
   #     Toolchain: pnpm (web) + uv (api), Node 24, Python 3.14.
   #     Playwright e2e is intentionally NOT run here (manual/local only).

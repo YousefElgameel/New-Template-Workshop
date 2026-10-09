@@ -135,6 +135,15 @@ _target_ branch, not the _source_):
 A violation fails the job with an explicit error. For this to actually block a merge, it must
 be configured as a **required status check** on `staging` and `main`.
 
+### Job — `corpus-secrets` — "Corpus secret scan"
+
+Runs on `ubuntu-latest` on every pull request and push, with a 10-minute limit. It checks out the repo (no git credential kept), sets up Python 3.14 and runs
+`python apps/api/scripts/check_corpus_secrets.py --include '*.md' docs` — standard library only, nothing to install.
+`docs/**/*.md` is what the assistant answers from, so a credential pasted into a document would be indexed and
+quotable (threat model G7). A match fails the job with the file, line and **kind** — never the value. The same script
+gates the api image build. A known fake value goes in `apps/api/scripts/corpus-secrets-allowlist.txt` (exact strings,
+reviewed in the same pull request); see [`commands.md`](../reference/commands.md#corpus-secret-scan-api-34-5-7--threat-model-g7).
+
 ### Job 2 — `test` — "Tests + coverage"
 
 Runs on `ubuntu-latest`. It checks out the repo, sets up **Node 24** and runs `corepack

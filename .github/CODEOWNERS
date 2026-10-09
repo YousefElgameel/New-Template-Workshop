@@ -7,3 +7,12 @@
 # NOTE: GitHub blocks approving your own PR, so with a single owner the owner's own PRs need
 # either a second code owner added here or the code-owner-review requirement relaxed.
 * @YousefElgameel
+
+# The control that keeps a pasted credential out of the corpus (api 5.7, threat model G7), the
+# list that can silence it, and the pipeline that runs it: a change to any of them needs the
+# owner's review. (Branch protection must require code owner review and the `Corpus secret scan`
+# check for this to bind; that is a repository setting.)
+/apps/api/scripts/check_corpus_secrets.py @YousefElgameel
+/apps/api/scripts/corpus-secrets-allowlist.txt @YousefElgameel
+/.github/workflows/ @YousefElgameel
+/docs/security/ @YousefElgameel

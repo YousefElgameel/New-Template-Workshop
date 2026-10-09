@@ -1,6 +1,6 @@
 """The corpus baked into the api image (api roadmap 3.4, ADR-0013) — offline.
 
-Docker is not needed: the build-time secret check is a stdlib script that is tested directly, the
+Docker is not needed: the build-time secret check is tested in test_corpus_secret_scan.py, the
 corpus directory the ingest job picks is tested with a temporary directory standing in for
 ``/app/corpus``, and the Dockerfile, compose file, ignore file and workflows are read as text for
 the properties the acceptance names (build context, non-root runtime, no ``.env``, the check
@@ -9,11 +9,9 @@ before the copy).
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
@@ -23,20 +21,6 @@ from app.ai.config import get_ai_settings
 API_DIR = Path(__file__).resolve().parents[1]
 REPO = API_DIR.parents[1]
 DOCKERFILE = API_DIR / "Dockerfile"
-
-
-def _load_checker() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "check_corpus_secrets", API_DIR / "scripts" / "check_corpus_secrets.py"
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-checker = _load_checker()
 
 
 # ── which directory the ingest job reads ─────────────────────────────────────
@@ -95,221 +79,6 @@ class TestCorpusDirectory:
         )
         source = (API_DIR / "app" / "ai" / "ingest.py").read_text(encoding="utf-8")
         assert 'IMAGE_CORPUS_DIR = Path("/app/corpus")' in source
-
-
-# ── the secret check ─────────────────────────────────────────────────────────
-
-# Built from pieces so this file itself holds no secret-looking string.
-FAKE_SECRETS = {
-    "aws_access_key_id": "AKIA" + "ABCDEFGHIJKLMNOP",
-    "secret_key_sk": "sk-" + "proj-abcdefghijklmnopqrstuvwx",
-    "github_token": "ghp_" + "a" * 36,
-    "jwt": "eyJ" + "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
-    "private_key_block": "-----BEGIN " + "RSA PRIVATE KEY-----",
-    "azure_storage_key": "AccountKey=" + "A" * 44 + "==",
-    "azure_shared_access_key": "SharedAccessKey=" + "B" * 30 + "==",
-    "azure_sas_signature": "https://acct.blob.example.net/c?sv=2024&sig=" + "Z" * 34,
-    "slack_token": "xox" + "b-1234567890-abcdefghij",
-    "google_api_key": "AI" + "za" + "Sy" + "A" * 33,
-    "stripe_key": "sk" + "_live_" + "a" * 24,
-    "bearer_token": "Authorization: Bearer " + "a1B2c3D4" * 5,
-    "url_credentials": "postgres://app:" + "S3cr3tPassw0rd" + "@db.example.com",
-    "keyword_assignment": "api_key = " + "a1b2c3d4e5f6a7b8c9d0e1f2",
-}
-
-LOOK_ALIKES = [
-    "keys start with AKIA and then sixteen characters",
-    "AKIA is the prefix of an AWS access key id",
-    "OpenAI keys look like sk- followed by letters",
-    "the task-based disk-usage-and-risk-assessment-report-generator",
-    "a github token begins with ghp_ and is 40 characters long",
-    "a JWT starts with eyJ... and has three parts",
-    "AKIAABCDEFGHIJKL is one character short",
-    "-----BEGIN CERTIFICATE-----",
-    "mssql+aioodbc://USER:PASSWORD@your-server.database.windows.net:1433/db",
-    "AccountKey=<your-key>",
-    "Authorization: Bearer <token>",
-    "00000000-0000-0000-0000-000000000000",
-    "Authorization: Bearer ${TOKEN}",
-    "api_key = <your-key>",
-    "password: changeme",
-    "token: your_token_here",
-    "secret: trace-id-propagation-header-name",
-    "token = 00000000-0000-0000-0000-000000000000",
-    "SharedAccessKey=<key>",
-    "https://host.example.net/p?sig=<signature>",
-    "postgres://USER:PASSWORD@host:5432/db",
-    "mssql://app:${DB_PASSWORD}@host/db",
-    "xoxo hugs and kisses",
-    "AIzaShort",
-    "sk_live is the prefix of a Stripe live key",
-]
-
-
-def _kinds(text: str) -> list[str]:
-    return [kind for _, kind in checker.scan_text(text)]
-
-
-class TestSecretPatterns:
-    @pytest.mark.parametrize(("kind", "secret"), sorted(FAKE_SECRETS.items()))
-    def test_each_kind_is_found(self, kind: str, secret: str) -> None:
-        assert _kinds(f"some text {secret} more text") == [kind]
-
-    def test_all_the_kinds_are_covered_here(self) -> None:
-        assert {kind for kind, _ in checker.PATTERNS} == set(FAKE_SECRETS)
-
-    @pytest.mark.parametrize("line", LOOK_ALIKES)
-    def test_a_look_alike_is_not_a_finding(self, line: str) -> None:
-        assert _kinds(line) == []
-
-    def test_a_secret_in_a_code_fence_or_a_table_is_found(self) -> None:
-        secret = FAKE_SECRETS["github_token"]
-        assert _kinds(f"```\nexport T={secret}\n```") == ["github_token"]
-        assert _kinds(f"| token | `{secret}` |") == ["github_token"]
-
-    def test_finding_lines_are_numbered_from_one(self) -> None:
-        found = list(checker.scan_text("clean\n\n" + FAKE_SECRETS["aws_access_key_id"]))
-        assert found == [(3, "aws_access_key_id")]
-
-    def test_a_pgp_private_key_block_is_found(self) -> None:
-        assert _kinds("-----BEGIN PGP " + "PRIVATE KEY BLOCK-----") == ["private_key_block"]
-
-    def test_a_documented_example_is_allowed_but_only_that_exact_value(self) -> None:
-        assert _kinds("the AWS docs use AKIAIOSFODNN7EXAMPLE") == []
-        other = FAKE_SECRETS["aws_access_key_id"]
-        assert _kinds(f"AKIAIOSFODNN7EXAMPLE and {other}") == ["aws_access_key_id"]
-        assert checker.ALLOWED_EXAMPLES == {"AKIAIOSFODNN7EXAMPLE"}
-
-    def test_one_line_with_two_kinds_reports_both(self) -> None:
-        line = f"{FAKE_SECRETS['aws_access_key_id']} {FAKE_SECRETS['jwt']}"
-        assert sorted(_kinds(line)) == ["aws_access_key_id", "jwt"]
-
-
-class TestSecretCheckCommand:
-    def _corpus(self, tmp_path: Path, **files: str) -> Path:
-        root = tmp_path / "corpus"
-        for name, text in files.items():
-            path = root / name.replace("__", "/")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-        return root
-
-    def test_a_clean_corpus_passes(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        root = self._corpus(tmp_path, **{"a.md": "# Fine\n", "sub__b.md": "text " + LOOK_ALIKES[0]})
-        assert checker.main([str(root)]) == 0
-        assert "clean" in capsys.readouterr().out
-
-    def test_a_finding_fails_and_prints_the_file_the_line_and_the_kind_only(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        secret = FAKE_SECRETS["github_token"]
-        root = self._corpus(
-            tmp_path, **{"ok.md": "fine", "deep__notes.md": f"x\nthe token {secret}\n"}
-        )
-        assert checker.main([str(root)]) == 1
-        captured = capsys.readouterr()
-        out = captured.out + captured.err
-        assert "deep/notes.md:2: looks like github_token" in out
-        assert "ok.md" not in out.replace("notes.md", "")
-        # never the matched text, never any part of it, never the line around it
-        assert secret not in out and secret[:8] not in out and "the token" not in out
-
-    def test_every_finding_of_every_file_is_listed(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        root = self._corpus(
-            tmp_path,
-            **{
-                "a.md": FAKE_SECRETS["jwt"],
-                "b.md": FAKE_SECRETS["private_key_block"],
-            },
-        )
-        assert checker.main([str(root)]) == 1
-        err = capsys.readouterr().err
-        assert "a.md:1: looks like jwt" in err and "b.md:1: looks like private_key_block" in err
-        assert "2 finding(s)" in err
-
-    def test_bytes_that_are_not_utf8_are_read_without_failing(self, tmp_path: Path) -> None:
-        root = self._corpus(tmp_path)
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "latin1.md").write_bytes(b"caf\xe9 and \x80\x81 text")
-        assert checker.main([str(root)]) == 0
-
-    def test_a_secret_hidden_in_utf8_garbage_is_still_found(self, tmp_path: Path) -> None:
-        root = self._corpus(tmp_path)
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "mixed.md").write_bytes(b"\x80\x81 " + FAKE_SECRETS["jwt"].encode() + b" \xe9")
-        assert checker.main([str(root)]) == 1
-
-    @pytest.mark.parametrize(
-        "data",
-        [
-            "token text".encode("utf-16"),
-            "token text".encode("utf-16-le"),
-            "token text".encode("utf-16-be"),
-            b"plain\x00text",
-            b"\xff\xfe",
-            b"\xfe\xff",
-        ],
-        ids=[
-            "utf-16 with BOM",
-            "utf-16-le",
-            "utf-16-be",
-            "a NUL byte",
-            "a BOM alone",
-            "a BE BOM alone",
-        ],
-    )
-    def test_text_a_pattern_cannot_read_is_a_finding_by_itself(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], data: bytes
-    ) -> None:
-        root = self._corpus(tmp_path)
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "wide.md").write_bytes(data)
-        assert checker.main([str(root)]) == 1
-        assert "wide.md:0: looks like not_plain_text" in capsys.readouterr().err
-
-    def test_a_missing_directory_fails_the_build_instead_of_passing_it(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        assert checker.main([str(tmp_path / "nowhere")]) == 2
-        assert "is not a directory" in capsys.readouterr().err
-
-    def test_no_argument_fails(self, capsys: pytest.CaptureFixture[str]) -> None:
-        assert checker.main([]) == 2
-        assert "usage" in capsys.readouterr().err
-
-    def test_it_runs_as_a_script_with_the_standard_library_only(self, tmp_path: Path) -> None:
-        import subprocess
-
-        root = self._corpus(tmp_path, **{"a.md": FAKE_SECRETS["aws_access_key_id"]})
-        script = API_DIR / "scripts" / "check_corpus_secrets.py"
-        run = subprocess.run(
-            [sys.executable, "-I", str(script), str(root)], capture_output=True, text=True
-        )
-        assert run.returncode == 1 and "a.md:1: looks like aws_access_key_id" in run.stderr
-        imports = re.findall(r"^(?:from|import) (\w+)", script.read_text(encoding="utf-8"), re.M)
-        assert set(imports) <= set(sys.stdlib_module_names) | {"__future__"}
-
-    def test_the_repositorys_own_docs_pass(self) -> None:
-        """What the image build would check: a secret pasted into a document fails here first.
-
-        Only the files the image keeps: visible ``.md`` files (``openapi.json`` and the wireframe
-        ``.html`` are not shipped)."""
-        shipped = [
-            p
-            for p in sorted((REPO / "docs").rglob("*.md"))
-            if p.is_file()
-            and not any(part.startswith(".") for part in p.relative_to(REPO / "docs").parts)
-        ]
-        assert shipped, "no markdown found: is the docs directory where the test expects it?"
-        for path in shipped:
-            assert list(checker.scan_text(path.read_bytes().decode("utf-8", "replace"))) == [], path
-            assert b"\x00" not in path.read_bytes() and not path.read_bytes().startswith(
-                checker.UTF16_BOMS
-            ), path
 
 
 # ── the image, as text ───────────────────────────────────────────────────────
@@ -406,6 +175,8 @@ class TestDockerfile:
         assert run.rstrip().endswith("/corpus")
         assert "|| true" not in run and "; python" not in run
         assert "COPY apps/api/scripts/check_corpus_secrets.py" in _stages()["corpus"]
+        # and the allow-list is copied next to it, where the script looks for it
+        assert "apps/api/scripts/corpus-secrets-allowlist.txt /work/" in _stages()["corpus"]
 
     def test_an_empty_corpus_fails_the_build_too(self) -> None:
         assert 'test -n "$(ls -A /corpus)"' in _stages()["corpus"]

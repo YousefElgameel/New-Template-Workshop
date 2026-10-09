@@ -94,10 +94,11 @@ this as a starting map; read the actual files when you need detail.
   `.dockerignore` governs it (`.env*`, `.git`, keys, `node_modules`, the web app and `infra/` stay out of the
   context) and the Dockerfile copies named paths only. `apps/api/.dockerignore` is no longer read.
 - **The `corpus` stage** keeps the visible `.md` files of `docs/`, runs `scripts/check_corpus_secrets.py` on them and
-  the build **fails** on a secret-looking string (AWS key id, `sk-`, GitHub token, JWT, private key, Azure keys, Slack,
-  Google, Stripe, bearer tokens, URL credentials, `password=`-style assignments, a UTF-16 or NUL-holding file): the
-  output is file, line and kind, never the text. Documented fake values go in `ALLOWED_EXAMPLES` (exact strings, in a
-  reviewed change). The runtime stage copies the result, root-owned, to `/app/corpus`.
+  the build **fails** on a secret-looking string (AWS key id, `sk-`, GitHub token, JWT, private key, Azure keys and AD client secrets, Slack,
+  Google, Stripe, bearer tokens, URL credentials, connection-string passwords, `name = value` assignments and long random
+  values next to a secret word, a symlink, a UTF-16 or NUL-holding file, a line over 20,000 characters): the
+  output is file, line and kind, never the text. The document is scanned as written and as ingestion indexes it. Documented fake values go in
+  `scripts/corpus-secrets-allowlist.txt` (`<kind> <exact value>`, in a reviewed change; CODEOWNERS covers it). The same script runs in CI on every pull request (api 5.7, the `Corpus secret scan` job). The runtime stage copies the result, root-owned, to `/app/corpus`.
 - **Which corpus the ingest job reads:** `CORPUS_DIR`; else `/app/corpus` when `APP_ENV` is not `local` and it exists;
   else the repository's `docs/`. So an api run by `docker compose` (`APP_ENV=local`) reads no baked corpus: set
   `CORPUS_DIR=/app/corpus` there, or run it with another `APP_ENV`.

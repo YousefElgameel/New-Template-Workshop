@@ -79,6 +79,26 @@ database is a **human** step — agents use only the offline / `heads` / `check`
 
 From inside `apps/api`, drop `--directory apps/api` (`uv run alembic …`).
 
+#### Corpus secret scan (api 3.4, 5.7 — threat model G7)
+
+The check that stops a credential pasted into a document from being indexed and answered from. It is the same
+stdlib-only script in two places: the `corpus` stage of `apps/api/Dockerfile`, and the **`Corpus secret scan`** job of
+`.github/workflows/ci.yml` (every pull request and push, no dependencies to install).
+
+| Command                                                                                             | Purpose                                     | Notes                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `python apps/api/scripts/check_corpus_secrets.py --include '*.md' docs`                             | What CI runs: scan `docs/**/*.md`           | Prints `file:line: looks like <kind>` for each match, **never the value**. Exit `0` clean, `1` a finding, `2` a missing directory or a missing or bad allow-list.                                                                                     |
+| `python apps/api/scripts/check_corpus_secrets.py [--include GLOB] [--allowlist FILE] DIR [DIR ...]` | Scan any directory, with another allow-list | Kinds: AWS, `sk-`, GitHub, JWT, private key, Azure storage / shared-access / SAS, Slack, Google, Stripe, bearer, URL credentials, connection-string `Password=`, `password=`-style and long random values next to a secret word, UTF-16 or NUL files. |
+| `uv run --directory apps/api pytest tests/test_corpus_image.py`                                     | The scanner's own tests                     | Each kind has a fake secret and look-alikes that must not match; a test runs the scan on the repository's own `docs/`.                                                                                                                                |
+
+Each document is scanned as written **and** as ingestion will index it (control and format characters and `<!-- comments -->`
+removed), so a secret split by something ingestion removes is still found. A known fake value (the AWS documentation's
+`AKIAIOSFODNN7EXAMPLE`) goes in `apps/api/scripts/corpus-secrets-allowlist.txt` as `<kind> <exact value>`: tied to the kind it
+silences, at least 8 characters, `#` for comments, the value must be what the kind matches, and `private_key_block` cannot be
+listed. There is no file-level or pattern-level bypass, and `.github/CODEOWNERS` names the scanner, the list and the
+workflows. To make the CI job block a merge it must be a **required status check**, with code owner review required, on the
+protected branches (repository settings, like `promotion-guard`).
+
 ### Root `package.json`
 
 | Script  | Runs                                                                                                                                                        | Notes                                                                                                                                                     |
