@@ -8,10 +8,11 @@ skill and consulted live by the `incident-responder` agent.
   mitigate, verify-recovery, root-cause patterns.
 - No credentials, PII, or "ping <person>" steps — a runbook must work without a specific human.
 
-| Runbook                                               | Symptom                                                                                      | Last updated |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------ |
-| [observability-degraded](observability-degraded.md)   | `/health` → `"observability": "disabled"`, or telemetry missing despite `enabled`            | 2026-07-26   |
-| [post-deploy-smoke](post-deploy-smoke.md)             | (procedure, not incident) — prove every telemetry pillar after a deploy / telemetry change   | 2026-07-26   |
-| [rotate-ingest-admin-key](rotate-ingest-admin-key.md) | (procedure) — rotate `INGEST_ADMIN_KEY`, the secret of `POST /v1/admin/ingest`; or it leaked | 2026-10-09   |
-| [pii-purge](pii-purge.md)                             | PII or a secret leaked into an exported log line (slipped past redaction-at-source)          | 2026-07-25   |
-| [platform-log-tables](platform-log-tables.md)         | container stdout/platform logs not found in Log Analytics; choosing the ACA log destination  | 2026-07-26   |
+| Runbook                                               | Symptom                                                                                                                 | Last updated |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------ |
+| [observability-degraded](observability-degraded.md)   | `/health` → `"observability": "disabled"`, or telemetry missing despite `enabled`                                       | 2026-07-26   |
+| [post-deploy-smoke](post-deploy-smoke.md)             | (procedure, not incident) — prove every telemetry pillar after a deploy / telemetry change                              | 2026-07-26   |
+| [rotate-ingest-admin-key](rotate-ingest-admin-key.md) | (procedure) — rotate `INGEST_ADMIN_KEY`, the secret of `POST /v1/admin/ingest`; or it leaked                            | 2026-10-09   |
+| [purge-conversations](purge-conversations.md)         | (procedure) — remove one conversation, or all older than a date, from the Azure SQL database by hand; a removal request | 2026-10-09   |
+| [pii-purge](pii-purge.md)                             | PII or a secret leaked into an exported log line (slipped past redaction-at-source)                                     | 2026-07-25   |
+| [platform-log-tables](platform-log-tables.md)         | container stdout/platform logs not found in Log Analytics; choosing the ACA log destination                             | 2026-07-26   |

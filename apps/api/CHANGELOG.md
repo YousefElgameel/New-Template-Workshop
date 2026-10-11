@@ -7,6 +7,17 @@ The two services version independently.
 
 ## [Unreleased]
 
+### Documentation
+
+- **A runbook to remove conversations from the database** (roadmap api 5.8): `docs/operations/runbooks/purge-conversations.md`
+  gives reviewed T-SQL to remove one conversation, or every conversation not touched since a date. Each delete batch
+  holds the rows it removes (`UPDLOCK, HOLDLOCK`, so no message can be added mid-way), deletes messages before their
+  conversation, refuses to run until the expected counts from a dry run are set, stops for a cutoff less than 30 days ago,
+  and commits only when `@commit = 1` and the counts match; otherwise it rolls back. It names the least privilege needed
+  (`SELECT`, `DELETE` on two tables, granted for the task), what a removal does **not** reach (backups, SQL statement
+  text, the model service) and the retention decision (none automatic for now, revisit when auth lands). `pii-purge.md`
+  is telemetry only and now says so. `tests/test_runbooks.py` pins the statements to the models.
+
 ## [0.16.0] — 2026-10-09
 
 ### Added

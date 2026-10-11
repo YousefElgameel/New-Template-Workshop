@@ -1,5 +1,9 @@
 # Runbook — Purging accidental PII / secrets from Log Analytics
 
+> **Telemetry only.** This runbook removes data from Log Analytics. It does **not** cover the application's
+> database: to remove a conversation or the chat history from Azure SQL, use
+> [`purge-conversations.md`](purge-conversations.md).
+
 **When to use:** a log line containing personal data (emails, names, user ids) or a secret
 (token, password, connection string) was exported to Application Insights / Log Analytics —
 i.e. it slipped past the redaction-at-source list (see
