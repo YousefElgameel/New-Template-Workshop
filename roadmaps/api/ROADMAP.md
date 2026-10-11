@@ -533,7 +533,7 @@ need a human with access._
 
 ### 5.3 — More injection eval cases and a live eval run
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [4.2, 4.4]
 - **layers:** [ai]
 - **acceptance:**
@@ -541,11 +541,18 @@ need a human with access._
   - the offline harness still proves what the model receives (rules first, one system message, nothing from history or passages in the system role beyond the context slot)
   - the live tier (`AI_EVAL_LIVE=true`) grades every case; the result is recorded in this item's notes, and a case that fails live is fixed in the prompt or code before the item is closed
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - offline: `uv run --directory apps/api pytest tests/evals -q` - expect 43 passed. The five new cases (markdown image, markdown link, citation to `[9]`/`[12]`, a poisoned earlier assistant turn with a forged `system` row, a poisoned earlier turn telling the model to guess) each pass with their scripted good answer and each have an "obeying" answer that the case rejects
+  - the harness replays a case's `history` through `history_messages`: the model receives one system message first, then only the `user`/`assistant` turns, then the question; a `system` row reaches it in no role
+  - live (yours, see needs*human): `AI_EVAL_LIVE=true uv run --directory apps/api pytest tests/evals -q` with the dev `AZURE_AI*\*`in`apps/api/.env` - expect every case to pass; run it twice
 - **needs_human:**
-  - run the live eval tier against the dev Foundry deployment (`AZURE_AI_*` in `apps/api/.env`) and report the result — an agent cannot call the real model
+  - run the live eval tier against the dev Foundry deployment (`AZURE_AI_*` in `apps/api/.env`), twice, and record the result in this item's notes - an agent cannot call the real model. The acceptance says a case that fails live is fixed in the prompt or code before the item is closed: the prompt was NOT changed here, so a live failure means a prompt/code fix still to come
+  - read each live failure: a correct answer that explains a refusal can trip a needle (quoting the attacker host, naming `[9]`, "I don't know" instead of "do not know"); tell me which failures are real and which are phrasing
 - **notes:**
   - 2026-10-06 — planned from the api 3.1 threat model (G12). The offline tier only pins the plumbing and the prompt's wording; this is the item that shows how the real model behaves under injection.
+  - 2026-10-11 - started by Claude.
+  - 2026-10-11 - implemented by Claude, awaiting test by Yousef Wahid. Files: `apps/api/tests/evals/cases.json` (5 cases + `history`), `apps/api/tests/evals/test_evals.py` (history replay, what the model receives, bite tests), `docs/architecture/ai.md`, `.claude/rules/70-ai.md`, the threat model (G12 row), `apps/api/CHANGELOG.md` (Unreleased, Tests). Tests/docs only: no version bump, prompt unchanged. Mutation-checked: a stored `system` row mapped to a system message, history not replayed, and the image rule removed from the prompt are each caught. Review: `code-reviewer`, no blockers; its three points (isolate the obeying answers, the changelog wording, broaden the link/image needles to `](`, `<img`, `<http`) are applied. Not run: the live tier. No security review: no env, DB, HTTP or tool change.
+  - 2026-10-11 - not done, recorded: the live tier is unrun, so none of the new cases has graded a real model; offline the answers are scripted and prove the plumbing only; the history check compares against `history_messages` itself, so truncation and ordering of that function are covered only by `tests/ai`.
+  - 2026-10-11 - confirmed by Yousef Wahid. The live eval run (twice, against dev) and any prompt or code fix it calls for remain in `needs_human`; nothing has graded a real model yet.
 
 ### 5.4 — Bound a thread read by bytes
 

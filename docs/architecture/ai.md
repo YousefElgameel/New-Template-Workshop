@@ -223,11 +223,17 @@ auth selection, the graph, streaming, tools, retrieval, ingestion and telemetry;
 `tests/evals/` is the **prompt regression harness** — `cases.json` scripts the model's answer so
 the pipeline around the prompt (retrieval → prompt → sources → citations) is pinned — each case
 is a `grounded`, `out-of-context` or `injection` kind, and the harness records what the model
-receives (one system message, the rendered prompt, plus the question); extend it whenever a
-prompt changes. Offline the answers are scripted, so this tier pins the plumbing and the
+receives (one system message, the rendered prompt, then the case's earlier turns and the question: a case
+can carry a `history` of stored rows, mapped by `history_messages` like the api does, so a forged `system` row
+must reach the model in no role); the injection cases cover a passage that gives orders, a forged header or
+context marker, a request for the prompt, a **markdown image or link that would carry the question out**, a passage
+that asks for a **citation number that does not exist**, and a **poisoned earlier assistant turn**; extend it
+whenever a prompt changes. Offline the answers are scripted, so this tier pins the plumbing and the
 guardrail wording, **not** model behaviour: run the live tier (`AI_EVAL_LIVE=true`) before
 releasing a prompt change. The prompt cannot make injection impossible — citation checks and
-passage delimiting belong in code (api roadmap 4.2). A live-model tier is opt-in (`AI_EVAL_LIVE=true`).
+passage delimiting belong in code (api roadmap 4.2). A live-model tier is opt-in: `AI_EVAL_LIVE=true uv run --directory apps/api pytest tests/evals -q` (PowerShell: set `$env:AI_EVAL_LIVE='true'` first) with the dev `AZURE_AI_*`
+settings grades **every** case with the deployment's own answer (the recorder-based checks are skipped there). A model
+answers differently each time, so run it more than once and treat a case that fails once as failing.
 
 ---
 
