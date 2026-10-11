@@ -195,8 +195,19 @@ responses coming back through the BFF:
 
 ```bash
 make up                        # or: make dev
+pnpm -C apps/web exec playwright install chromium   # once, and after a Playwright upgrade
 pnpm -C apps/web test:e2e
 ```
+
+Two specs:
+
+- `e2e/home.spec.ts` — the home page pings the api through the BFF and renders a `trace_id`.
+- `e2e/chat.spec.ts` — the `/chat` journey: open the page, start a new chat, ask a question, see the answer with at
+  least one citation, reload and reopen the conversation from the list. It needs the api's migrations applied and the
+  corpus ingested (an answer must cite a document), and it must run **against the real api**: with
+  `MOCK_UPSTREAM=true` it runs the first half and is then reported as **skipped**, not passed, because a mocked
+  conversation is not stored. The conversation it creates stays in the shared list; its title starts with `e2e-smoke`.
+  Run one spec with `pnpm -C apps/web test:e2e e2e/chat.spec.ts`; `WEB_BASE_URL` targets another web (the dev one).
 
 `baseURL` defaults to `http://localhost:3000` and can be overridden with `WEB_BASE_URL`. The
 project runs Chromium, `fullyParallel`, with `trace: 'on-first-retry'`.

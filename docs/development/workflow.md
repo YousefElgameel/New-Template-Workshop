@@ -191,8 +191,12 @@ It needs the whole stack running. Run it before a release:
 
 ```bash
 make up                       # or make dev
+pnpm -C apps/web exec playwright install chromium   # once
 pnpm -C apps/web test:e2e
 ```
+
+The `/chat` journey (`e2e/chat.spec.ts`) needs the real api with its migrations applied and the corpus ingested; see
+[testing](testing.md#playwright-end-to-end).
 
 ### Deferred CI hardening
 

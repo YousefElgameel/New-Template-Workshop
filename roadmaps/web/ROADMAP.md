@@ -378,15 +378,23 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 4.3 — Playwright smoke for `/chat`
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [4.2]
 - **layers:** [ui]
 - **acceptance:**
   - an `e2e/chat.spec.ts` smoke test: open `/chat`, start a new chat, ask a question, see an answer and at least one citation, reopen the conversation from the list
   - it is manual/local like the existing smoke test (needs web and api up) and is documented where `test:e2e` is
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm -C apps/web typecheck` - expect no output; `pnpm -C apps/web test` - expect 29 files / 693 tests passed (the only source change is `data-testid="message-text"` on a message's text)
+  - read `apps/web/e2e/chat.spec.ts` and the "Playwright end-to-end" section of `docs/development/testing.md`
+  - run it against a mocked web (no api needed): `MOCK_UPSTREAM=true pnpm -C apps/web dev`, then `WEB_BASE_URL=http://localhost:3000 pnpm -C apps/web test:e2e e2e/chat.spec.ts` - expect `1 skipped` (the first half ran: new chat, a streamed answer, a citation; the reopen half cannot be tested against fixtures)
+  - the real run is yours, see needs_human
 - **needs_human:**
-  - run it locally against dev and report the result (Playwright is not part of `just test`)
+  - run it locally against dev and report the result (Playwright is not part of `just test`): web and the real api up (`just dev` with `MOCK_UPSTREAM` unset, and remove `MOCK_UPSTREAM=true` from your own `apps/web/.env`), the api's migrations applied and the corpus ingested (api 5.1 runbook, steps 1-5), `pnpm -C apps/web exec playwright install chromium` once, then `pnpm -C apps/web test:e2e e2e/chat.spec.ts`. Expect `1 passed`; the conversation it creates stays in the shared list, its title starts with `e2e-smoke`
+  - if it fails, say which step: the error line under the question (an answer failure shows at once, with the api error), no citation, or the reopen
 - **notes:**
   - 2026-10-06 — planned.
+  - 2026-10-11 - started by Claude.
+  - 2026-10-11 - implemented by Claude, awaiting test by Yousef Wahid. Files: `apps/web/e2e/chat.spec.ts` (new), `apps/web/src/components/chat/ChatThread.tsx` (`data-testid="message-text"`), `docs/development/testing.md`, `docs/development/workflow.md`, `apps/web/CLAUDE.md`, `apps/web/CHANGELOG.md` + `package.json` (0.9.2). Review: `code-reviewer`, nothing blocking; applied: a mock run is reported SKIPPED not passed, an answer failure stops the test at once with the error instead of waiting out the timeout, the reopen row is matched by this run's timestamp, the answer timeout is 300 s (the hop's 5 minutes), exact names and a pinned desktop viewport. No security review: no env, HTTP, DB or tool change.
+  - 2026-10-11 - not done, recorded: NOT run against the real api (an agent cannot reach dev), so the reopen half and the citation against real data are untested; it ran once against a mocked web (first half passed, a deliberately wrong citation-path assertion failed it), using the installed Chromium 1187 through a temporary config outside the repo because Playwright 1.60 wants build 1223 (run `playwright install chromium`); the e2e suite is still not in CI. A `test-results/` folder (gitignored) was left by the first failed launch in `apps/web`.
+  - 2026-10-11 - confirmed by Yousef Wahid. The real run against dev (and removing `MOCK_UPSTREAM=true` from his own `.env`) remains in `needs_human`.

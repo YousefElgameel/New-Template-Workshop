@@ -157,7 +157,9 @@ pnpm -C apps/web build          # next build (standalone output)
 pnpm -C apps/web test           # Vitest (lib + BFF routes in node; components in jsdom); test:cov for coverage
 pnpm -C apps/web typecheck      # tsc --noEmit
 pnpm -C apps/web api-types      # regenerate src/lib/api-types.ts from docs/reference/openapi.json (or: make openapi)
-pnpm -C apps/web test:e2e       # Playwright smoke — MANUAL/local, needs web + api up
+pnpm -C apps/web test:e2e       # Playwright smoke (e2e/home.spec.ts, e2e/chat.spec.ts) — MANUAL/local, needs web + api up
+                                # (first: pnpm -C apps/web exec playwright install chromium). chat.spec.ts needs the REAL api
+                                # (migrated, corpus ingested); with MOCK_UPSTREAM it runs to the answer, then reports SKIPPED
 ```
 
 ## Gotchas

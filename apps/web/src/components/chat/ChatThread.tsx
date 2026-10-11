@@ -40,7 +40,9 @@ export function ChatThread({ messages, onRetry }: Readonly<Props>) {
           <span className="mb-1 block text-xs font-semibold uppercase tracking-wide opacity-70">
             {ROLE_LABEL[m.role]}
           </span>
-          <span className="whitespace-pre-wrap">{m.text}</span>
+          <span className="whitespace-pre-wrap" data-testid="message-text">
+            {m.text}
+          </span>
           {m.pending && (
             <span className="ml-1 inline-block animate-pulse" aria-label="Streaming">
               …

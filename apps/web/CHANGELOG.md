@@ -7,6 +7,20 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-10-11
+
+### Added
+
+- **A Playwright smoke for `/chat`** (web roadmap 4.3, `e2e/chat.spec.ts`): open `/chat`, start a new chat, ask a question,
+  see the answer finish with at least one citation (a `docs/` path, plain text, never a link), then reload and reopen the
+  conversation from the list and see its stored question, answer and sources. Manual/local like `home.spec.ts` (not in CI,
+  not in `just test`): it needs web and the real api up, the api's migrations applied and the corpus ingested. Against
+  `MOCK_UPSTREAM=true` it runs the first half and is then reported **skipped** (not passed), because a mocked conversation
+  is not stored. Documented in `docs/development/testing.md`, `workflow.md` and `apps/web/CLAUDE.md`, with the one-time
+  `playwright install chromium`.
+- `data-testid="message-text"` on the text of a chat message (`ChatThread`), so the smoke does not depend on CSS classes.
+  No visible change.
+
 ## [0.9.1] — 2026-10-11
 
 ### Changed
