@@ -484,19 +484,25 @@ need a human with access._
 
 ### 5.1 — Dev smoke runbook
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [1.2, 3.3, 4.3]
 - **layers:** [docs]
 - **acceptance:**
   - `docs/operations/runbooks/team-assistant-dev-smoke.md` lists, in order, the commands and expected results to verify dev end to end: tables exist, ingest returns `202`, the index has documents with titles, a conversation can be created, an answer streams with citations, and the same `trace_id` appears in logs and Application Insights
   - it includes the failure signatures for the likely misses (wrong embedding dimension, missing admin key, ODBC driver missing)
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - read `docs/operations/runbooks/team-assistant-dev-smoke.md`: nine steps in order (0 services up, 1 tables, 2 database + ODBC driver, 3 ingest `202`, 4 run outcome, 5 index documents and titles, 6 conversation through the BFF, 7 streamed answer with citations and 7b pool health after a client leaves, 8 one `trace_id` in Log Analytics), each with the command, the expected result and the failure signature
+  - the failure signatures asked for are there: wrong embedding dimension (`dimension_mismatch`), missing admin key (`401 unauthorized`), ODBC driver missing (`IM002` / `internal_error`)
+  - `uv run --directory apps/api pytest tests/test_dev_smoke_runbook.py tests/test_runbooks.py -q` - expect green: the steps' order, tables, routes, error kinds and links are checked against the code, and no secret or real host is in the file
 - **needs_human:**
-  - run the smoke against dev and report the result
+  - run the smoke against dev, step by step, and report each step as pass or the signature you saw (the runbook's last section says what to record); it needs the dev web and api, the admin key (from Key Vault, never pasted), SQL read access, Search explorer and Log Analytics
+  - the exact driver error text for a missing ODBC driver and the SQL/Search specifics were not observed against dev: correct the runbook where dev shows something else
 - **notes:**
   - 2026-10-06 — planned. Delegate to `runbook-writer`.
   - 2026-10-07 — from the api 4.3 reviews, add to the smoke: frames reach the client one by one through the BFF and any ingress (they do through uvicorn); after a client leaves in the middle of the final write, the database connection pool is still healthy (a cancelled `commit()` with `mssql+aioodbc` was not verified offline).
+  - 2026-10-11 - started by Claude.
+  - 2026-10-11 - implemented by Claude, awaiting test by Yousef Wahid. Files: `docs/operations/runbooks/team-assistant-dev-smoke.md` (new), `docs/operations/runbooks/README.md` (row), `apps/api/tests/test_dev_smoke_runbook.py` (new). Includes both additions from the api 4.3 reviews (frames arrive one by one through the BFF and ingress; pool health after a client leaves mid-answer, step 7b). Docs-only: no api or web version bump. Not run against dev (an agent cannot reach it).
+  - 2026-10-11 - confirmed by Yousef Wahid. Running the smoke against dev remains in `needs_human`.
 
 ### 5.2 — Ingest lock that works across replicas
 
