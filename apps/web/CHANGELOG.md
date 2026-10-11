@@ -7,6 +7,27 @@ The two services version independently.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-10-11
+
+### Changed
+
+- **The ask response type is now generated** (web roadmap 4.2): `ConversationAskResponse` is `AskOut` from
+  `src/lib/api-types.ts` (`make openapi`), like every other JSON body of the conversation surface, so a change to the
+  api's ask response fails the type-check here. Only the stream frames stay declared: OpenAPI describes
+  `…/ask/stream` as one `text/event-stream` string. The `TODO(contract)` is gone.
+- **`MOCK_UPSTREAM` is documented and off by default** in `.env.example` (unset: `just dev` talks to the real api). A
+  `true` left in your own `.env` or `.env.local` overrides the example; remove it to run against the api.
+
+### Added
+
+- `src/lib/conversation-contract.test.ts` pins the stream frames (`sources`, `token`, `done`, `error`) to the frame table in
+  `docs/reference/http-api.md`: the declared types (their keys are checked by `pnpm typecheck`, which CI runs, not by
+  Vitest), the fixtures and the fields the client reads must all use the documented field **names**, and the client is run
+  over the fixtures to prove each field reaches its handler. Value types and the `error_kind` words are not compared. A
+  test also keeps `.env.example` from turning the mocks on.
+- The frame table in `docs/reference/http-api.md` says it is the contract for the frames, and `MOCK_UPSTREAM` is in
+  `docs/reference/environment-variables.md`.
+
 ## [0.9.0] — 2026-10-09
 
 ### Added

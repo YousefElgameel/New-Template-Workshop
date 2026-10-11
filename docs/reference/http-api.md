@@ -249,7 +249,10 @@ Source: `apps/api/app/routers/ask.py` (roadmap api 4.3). The same request, histo
 limits as `POST …/ask` above; the answer arrives as server-sent events (`text/event-stream`,
 `Cache-Control: no-cache`, `X-Accel-Buffering: no`). Request body: `{ "question": "…" }`.
 
-Each frame is one `event:` line, one JSON `data:` line and a blank line.
+Each frame is one `event:` line, one JSON `data:` line and a blank line. OpenAPI cannot describe an event stream, so
+this table is the contract for the frames: the web client's types (`apps/web/src/lib/conversation-types.ts`) and its
+fixtures are pinned to it by `src/lib/conversation-contract.test.ts`, which fails when a field **name** is added,
+removed or renamed on one side only (value types are not compared).
 
 | Event     | `data`                                                                  | When                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | --------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

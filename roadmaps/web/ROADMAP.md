@@ -354,7 +354,7 @@ conversation surface (decision 18) — the removal is item 4.1._
 
 ### 4.2 — Switch to the generated types and turn the mocks off
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [4.1, api:2.1, api:4.3]
 - **layers:** [bff]
 - **acceptance:**
@@ -362,11 +362,19 @@ conversation surface (decision 18) — the removal is item 4.1._
   - the stream frame shapes are documented in `docs/reference/http-api.md` and the client matches them
   - `MOCK_UPSTREAM` stays available for offline work but is off by default in `.env.example`
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - `pnpm -C apps/web typecheck` - expect no output (the ask response is now the generated `AskOut`; the declared frame types' keys are enforced here, not by Vitest)
+  - `pnpm -C apps/web test` - expect 29 files / 693 tests passed, including the new `src/lib/conversation-contract.test.ts` (the frame table in `docs/reference/http-api.md` vs the declared types, the fixtures, and `askStream` run over the fixtures) and the `.env.example` check in `mocks.test.ts`
+  - read `apps/web/.env.example`: `MOCK_UPSTREAM=` is empty with a comment (off by default); `MOCK_UPSTREAM=true pnpm -C apps/web dev` still serves the fixtures (`x-mock-upstream: true`)
+  - the real run is yours, see needs_human
 - **needs_human:**
-  - run web and api together against dev (`just dev`) with `MOCK_UPSTREAM` unset, create a conversation, ask a question and confirm an answer streams back with citations and one `trace_id` appears in both services' logs
+  - run web and api together against dev (`just dev`) with `MOCK_UPSTREAM` unset, create a conversation, ask a question and confirm an answer streams back with citations and one `trace_id` appears in both services' logs. The api needs the migrations applied and the corpus ingested first (api 5.1 runbook, steps 1-5)
+  - remove `MOCK_UPSTREAM=true` from your own `apps/web/.env` (it exists and is gitignored; an agent does not read or edit it): it overrides `.env.example`, so without this `just dev` still serves fixtures. A response carrying `x-mock-upstream: true` means the mocks are still on
 - **notes:**
   - 2026-10-06 — planned. Needs api migration applied (api:1.2) and the corpus ingested (api:3.3) for a real answer.
+  - 2026-10-11 - started by Claude.
+  - 2026-10-11 - implemented by Claude, awaiting test by Yousef Wahid. Files: `apps/web/src/lib/conversation-types.ts` (`ConversationAskResponse` = generated `AskOut`; no more `TODO(contract)`), `src/lib/conversation-contract.test.ts` (new), `src/lib/mocks.test.ts`, `.env.example`, `src/mocks/conversations.ts` + `README.md` (comments), `apps/web/CLAUDE.md`, `CHANGELOG.md` + `package.json` (0.9.1), `docs/reference/http-api.md`, `docs/reference/environment-variables.md`. Reviews: `code-reviewer` (no blockers; applied: the client is now checked by running `askStream` over the fixtures instead of a regex, the docs say names only and that the types' keys are enforced by `typecheck`, the alias moved) and `security-reviewer` (no CRITICAL/HIGH; one MEDIUM below; test isolation fixed). Mutation-checked: a renamed doc field, a client that ignores `trace_id` or reads the wrong key, a new `DoneFrame` field and a drifted generated type are each caught.
+  - 2026-10-11 - not done, recorded: (1) the real dev run (needs_human); (2) the stream frames cannot be generated (OpenAPI has no schema for an event stream): they stay declared, pinned by name only - value types and the `error_kind` words are not compared; making the api publish the frame models in its OpenAPI is an api change; (3) from the security review: `isMockUpstream()` refuses only `APP_ENV=prod` (a deny-list), so a mistyped `APP_ENV` with `MOCK_UPSTREAM=true` would serve fixtures; nothing in `infra/` or compose sets `MOCK_UPSTREAM`, so it needs a hand-set variable - hardening (allow only `local`) is a separate change; (4) `typecheck` is run by CI but not by `make test`.
+  - 2026-10-11 - confirmed by Yousef Wahid. The real run against dev (and removing `MOCK_UPSTREAM=true` from his own `.env`) remains in `needs_human`.
 
 ### 4.3 — Playwright smoke for `/chat`
 

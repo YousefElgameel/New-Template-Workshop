@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MOCK_HEADER, isMockUpstream, mockJson, mockSse } from '@/lib/mocks';
 import { sseFrame } from '@/lib/sse';
@@ -45,5 +47,27 @@ describe('mock upstream mode', () => {
     expect(res.headers.get(MOCK_HEADER)).toBe('true');
     const text = await res.text();
     expect(text).toBe('event: token\ndata: {"text":"a"}\n\nevent: done\ndata: {}\n\n');
+  });
+});
+
+describe('the example environment', () => {
+  const example = readFileSync(
+    fileURLToPath(new URL('../../.env.example', import.meta.url)),
+    'utf8',
+  );
+
+  it('leaves MOCK_UPSTREAM off, so a copy of it talks to the real api', () => {
+    const lines = example.split(/\r?\n/).filter((line) => /^MOCK_UPSTREAM=/.test(line));
+    expect(lines).toHaveLength(1); // documented, and set exactly once
+    const value = lines[0].slice('MOCK_UPSTREAM='.length).trim().toLowerCase();
+    expect(['', 'false']).toContain(value);
+    const before = process.env.MOCK_UPSTREAM;
+    process.env.MOCK_UPSTREAM = value;
+    try {
+      expect(isMockUpstream()).toBe(false);
+    } finally {
+      if (before === undefined) delete process.env.MOCK_UPSTREAM;
+      else process.env.MOCK_UPSTREAM = before;
+    }
   });
 });

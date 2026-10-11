@@ -11,8 +11,8 @@ import { sseFrame } from '@/lib/sse';
 /**
  * Fixtures for the conversation surface (`/api/v1/conversations…`) — web roadmap 1.1.
  *
- * Typed from `@/lib/conversation-types` (generated for create/list/open, hand-declared for the
- * ask response and stream frames until api 4.2 / 4.3). The content mirrors the wireframe
+ * Typed from `@/lib/conversation-types` (generated for every JSON body, declared for the stream
+ * frames, which OpenAPI cannot describe). The content mirrors the wireframe
  * (`docs/design/wireframes/chat.md`) so the pages look right against the mocks. Streaming
  * fixtures are plain `string[]` frames: hand them to `mockSse(frames, traceId, delayMs)` to pace
  * them like the real stream.

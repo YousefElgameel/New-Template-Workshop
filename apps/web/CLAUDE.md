@@ -76,8 +76,9 @@ URL.
   frames, every field validated — see below), `src/lib/mocks.ts`
   (`isMockUpstream`/`mockJson`/`mockSse`), `src/lib/api-types.ts` (**generated** — `make openapi`).
 - `src/lib/conversation-types.ts` — the conversation contract (`/api/v1/conversations…`): create/list/open
-  types **derived from the generated `api-types`**; the ask response and the stream frames (`sources`/`token`/`done`/
-  `error`) are **hand-declared** (the api serves them since 4.3; `docs/reference/http-api.md` is the reference). `src/mocks/conversations.ts` — the
+  types (create, list, open **and the ask response**) **derived from the generated `api-types`**; only the stream frames (`sources`/`token`/`done`/
+  `error`) are declared (OpenAPI cannot describe an event stream); `docs/reference/http-api.md` is their reference and
+  `src/lib/conversation-contract.test.ts` fails when the table, the types, the fixtures or the client disagree about a field's **name** (value types are not compared; the types' keys are checked by `pnpm typecheck`, the rest by Vitest). `src/mocks/conversations.ts` — the
   fixtures typed from it: an empty list, three listed conversations, a detail for each (long, short, empty), a created
   conversation, a JSON answer, a streamed answer and a streamed failure (`error` frame); pass the frame arrays to
   `mockSse`. `src/mocks/conversations.test.ts` keeps them honest (ordering, limits, frame order).
@@ -132,7 +133,8 @@ URL.
 - Any upstream call from a route → `fetchUpstream` (trace propagation + echo), never bare `fetch`;
   SSE upstreams → `streamUpstream` + `proxyStream` (`src/lib/stream.ts`).
 - Server-only secrets/URLs; client components only call same-origin Next routes.
-- **Working ahead of the api:** `MOCK_UPSTREAM=true` in `.env.local` makes a route serve its
+- **Working ahead of the api:** `MOCK_UPSTREAM=true` in `.env.local` (**off by default**: `.env.example` leaves it unset, so
+  `just dev` talks to the real api) makes a route serve its
   `src/mocks/<feature>.ts` fixture (`isMockUpstream()` / `mockJson` / `mockSse` in
   `src/lib/mocks.ts`); fixtures are typed against `src/lib/api-types.ts` (generated — `make
 openapi`). Example: `/api/v1/conversations…` + the `/chat` page (`src/mocks/conversations.ts`).

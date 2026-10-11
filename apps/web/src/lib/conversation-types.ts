@@ -6,12 +6,14 @@ import type { components } from '@/lib/api-types';
  *
  * Two sources, on purpose:
  *
- * - **Generated** — everything the api already serves (create, list, open: api 2.1) is derived
- *   from `@/lib/api-types` (`make openapi`), so a backend change breaks the type-check here
- *   instead of drifting silently.
- * - **Hand-declared** — the ask response and the stream frames, because the api routes for them
- *   (api 4.2 / 4.3) do not exist yet. Shapes follow api roadmap 4.2 / 4.3.
- *   TODO(contract): replace with generated types once api:4.2 / api:4.3 land (web roadmap 4.2).
+ * - **Generated** — every JSON body the api serves (create, list, open, ask) is derived from
+ *   `@/lib/api-types` (`make openapi`), so a backend change breaks the type-check here instead of
+ *   drifting silently.
+ * - **Declared** — the stream frames, and only them: OpenAPI describes `…/ask/stream` as one
+ *   `text/event-stream` string, so there is nothing to generate them from. Their reference is
+ *   `docs/reference/http-api.md` (the frame table), and `conversation-contract.test.ts` fails when
+ *   that table, these types, the fixtures or the client disagree about a field's name (the types' keys
+ *   are checked by `pnpm typecheck`, the rest by Vitest).
  */
 type Schemas = components['schemas'];
 
@@ -32,14 +34,10 @@ export type ConversationMessage = Schemas['MessageOut'];
 /** `GET /api/v1/conversations/{id}` — messages oldest first, at most 500 (`truncated`). */
 export type ConversationDetail = Schemas['ConversationDetail'];
 
-// --- hand-declared (api 4.2 / 4.3) ----------------------------------------------------------
+/** `POST /api/v1/conversations/{id}/ask` → 200: the stored message id, the answer, what it cites. */
+export type ConversationAskResponse = Schemas['AskOut'];
 
-/** `POST /api/v1/conversations/{id}/ask` → 200. */
-export interface ConversationAskResponse {
-  message_id: string;
-  answer: string;
-  citations: Citation[];
-}
+// --- declared: the stream frames (api 4.3; `docs/reference/http-api.md`) --------------------
 
 /**
  * `event: sources` — retrieval finished; arrives before any token. `sources` lists **every

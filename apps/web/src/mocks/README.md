@@ -8,7 +8,9 @@ the mock branch. The rules:
 - **Type every fixture against the contract**: import the generated types from
   `@/lib/api-types` (`docs/reference/openapi.json` → `make openapi`). If the endpoint is not in
   the contract yet, write the type you expect next to the fixture and mark it
-  `// TODO(contract): replace with api-types once api:<roadmap id> lands`.
+  `// TODO(contract): replace with api-types once api:<roadmap id> lands`. (A server-sent-events stream is the one
+  thing the contract cannot type: declare its frames and pin them to `docs/reference/http-api.md` with a test, as
+  `src/lib/conversation-contract.test.ts` does.)
 - A BFF route uses the fixture only inside `if (isMockUpstream())` (`@/lib/mocks`) — the real
   call stays in the same handler, so removing the mock is a one-line deletion.
 - Mock mode is **server-side** (`MOCK_UPSTREAM=true` in `apps/web/.env.local`), never exposed
