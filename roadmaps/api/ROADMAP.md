@@ -500,18 +500,30 @@ need a human with access._
 
 ### 5.2 — Ingest lock that works across replicas
 
-- **status:** todo
+- **status:** done
 - **depends_on:** [3.3]
 - **layers:** [model, migration, endpoint]
 - **acceptance:**
   - a second ingest started from another replica while one runs also returns `409 ingest_running`; a lock left behind by a crashed run expires on its own
   - the lock is a small table (or row) in the project database, created by a new migration
 - **how_to_test:**
-  - _(filled in by `/implement-next`)_
+  - offline: `uv run --directory apps/api pytest tests/test_ingest_lock.py tests/test_migration_ingest_locks.py tests/test_admin_ingest.py -q` - expect all green (two replicas, expiry, take-over, lost lock, fail closed, deadline, endpoint)
+  - the SQL: `uv run --directory apps/api alembic upgrade 5228ef6b6604:9c3e5a7d1f42 --sql` - expect one `CREATE TABLE ingest_locks` (name NVARCHAR(64) PK, holder UNIQUEIDENTIFIER, acquired_at / expires_at DATETIME2(3)) and the version update; `alembic downgrade 9c3e5a7d1f42:5228ef6b6604 --sql` - expect `DROP TABLE ingest_locks`
+  - on dev, after a human applies the migration: start two api replicas (or two local apis on different ports with the dev `DATABASE_URL`), `POST /v1/admin/ingest` to the first, then to the second - expect `202` then `409 ingest_running`; when the first finishes, a new call is `202`
+  - kill the first api mid-run: within about 5 minutes a call to the other is `202` (the row expired); the ingest_locks row should be gone after a clean run (`SELECT * FROM ingest_locks` empty)
+  - the two-replicas race for an expired row is the one thing the offline tests cannot prove: run two calls at once against an expired row and expect exactly one `202`
+  - with the migration NOT applied, the call is `503 ingest_lock_unavailable` and the rest of the api works
 - **needs_human:**
-  - apply the migration to dev after review and confirmation
+  - apply migration `9c3e5a7d1f42` to dev after review and confirmation (`migrate.yml` or a named human) - **before** the api is deployed with a database, or the ingest endpoint answers 503
+  - the dev two-replica / crash / race checks above (real SQL Server behaviour: rowcount on aioodbc, take-over atomicity)
+  - the migrating login needs `CREATE TABLE`; the api's runtime login needs `SELECT, INSERT, UPDATE, DELETE` on `ingest_locks` (grant request if the roles are table-scoped)
+  - the team's docs: propose an `ingest_locks` section in `docs/design/db-design.md` (not edited by Claude) and, in `.claude/rules/25-sqlalchemy.md`, that tables written with the database clock have no server default
 - **notes:**
   - 2026-10-06 — planned, **only needed before the api runs more than one replica** (decision 19). Safe to leave `todo` until a deployment exists.
+  - 2026-10-11 — started by Claude.
+  - 2026-10-11 - implemented by Claude, awaiting test by Yousef Wahid. Files: `app/models/ingest_lock.py`, `alembic/versions/20261011_1100-9c3e5a7d1f42_create_ingest_locks.py`, `app/repositories/ingest_lock.py`, `app/ai/ingest_lock.py`, `app/ai/ingest_job.py` (async `start`, heartbeat, lost lock, deadline), `app/ai/config.py` (`INGEST_MAX_RUN_SECONDS`), `app/routers/admin.py`, `tests/test_ingest_lock.py`, `tests/test_migration_ingest_locks.py`, `tests/test_admin_ingest.py`, `tests/test_migration_conversations.py`, `.env.example`, `docker-compose.yml`, `environment-variables.md`, `http-api.md`, `ai.md`, the threat model (A4, D4, checklist), rule 70, `apps/api/CLAUDE.md`, the regenerated `openapi.json` + `api-types.ts`, `CHANGELOG.md` + `pyproject.toml`/`uv.lock` (0.17.0). Reviews: `code-reviewer` and `security-reviewer`; no CRITICAL; their findings applied (fail closed with time limits, give-up before expiry, per-renewal timeout, deployed no-URL fails closed, run deadline, kind-only logs).
+  - 2026-10-11 - not done, recorded: the lock is not a fence (a run paused past the ttl can overlap one another replica started; it learns at its next renewal; ingestion is idempotent); real SQL Server behaviour is covered by statement-compile and fake-database tests only; the web is unchanged.
+  - 2026-10-11 - confirmed by Yousef Wahid. The dev-database checks (two replicas, crash, race) remain in `needs_human`.
 
 ### 5.3 — More injection eval cases and a live eval run
 

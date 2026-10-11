@@ -143,7 +143,10 @@ by `source`; `--no-prune` turns it off), and every embedding, search and index c
 the run exits 1) when it would remove most of the index — a wrong `CORPUS_DIR` — unless
 `--force-prune`. A corpus of more than `INGEST_MAX_FILES` files or `INGEST_MAX_BYTES` bytes is refused before any
 file is read. The same run is started over HTTP by `POST /v1/admin/ingest` (`x-admin-key`, `app/ai/ingest_job.py`):
-`202` and a background task, one at a time per process (`409 ingest_running`), its outcome a log line and one
+`202` and a background task, one at a time **across replicas** (`409 ingest_running`: this process first, then a row in the
+`ingest_locks` table taken with the database's own clock, renewed every 100 s while the run goes and expiring on its own
+5 minutes after a crashed replica's last renewal; no database configured means the in-process lock alone; a configured
+database that cannot say is `503 ingest_lock_unavailable`), its outcome a log line and one
 `ingest.completed` event of counts and a bounded error kind (the counts and seconds are measurements, not
 dimensions to group by). The identity needs _Search Index Data
 Contributor_ + _Search Service Contributor_ (granted to the api identity by the `ai-search`

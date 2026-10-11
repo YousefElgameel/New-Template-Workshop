@@ -312,17 +312,17 @@ no catch-all, so nothing in the browser path reaches `/v1/admin`. No body.
 curl -X POST -H "x-admin-key: $INGEST_ADMIN_KEY" http://localhost:8000/v1/admin/ingest
 ```
 
-| Status | Body                                        | When                                                                                                                  |
-| ------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `202`  | `{ "status": "started" }`                   | the key is right and a run was started in the background (the corpus of `CORPUS_DIR`, default the repo's `docs/`)     |
-| `401`  | `{ "error": "unauthorized", "trace_id" }`   | the header is missing or wrong — **or `INGEST_ADMIN_KEY` is not set or shorter than 32 characters** (it fails closed) |
-| `409`  | `{ "error": "ingest_running", "trace_id" }` | a run is already in progress in this process (one replica; a lock across replicas is api 5.2)                         |
-| `503`  | `{ "error": "ai_unavailable", "trace_id" }` | Azure Search or the embedding deployment is not configured — nothing was started                                      |
+| Status | Body                                        | When                                                                                                                                                                                                                                                                           |
+| ------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `202`  | `{ "status": "started" }`                   | the key is right and a run was started in the background (the corpus of `CORPUS_DIR`, default the repo's `docs/`)                                                                                                                                                              |
+| `401`  | `{ "error": "unauthorized", "trace_id" }`   | the header is missing or wrong — **or `INGEST_ADMIN_KEY` is not set or shorter than 32 characters** (it fails closed)                                                                                                                                                          |
+| `409`  | `{ "error": "ingest_running", "trace_id" }` | a run is already in progress **in any replica**: in this process, or holding the database lock (`ingest_locks`, api 5.2)                                                                                                                                                       |
+| `503`  | `{ "error": "ai_unavailable", "trace_id" }` | Azure Search or the embedding deployment is not configured (`ai_unavailable`), **or** `DATABASE_URL` is configured but the lock cannot be taken (`ingest_lock_unavailable`: the migration `9c3e5a7d1f42` is not applied, or the database is unreachable) — nothing was started |
 
 The key is checked first, so a caller without it only ever learns `401`. The outcome is **not** in the response: the
 run logs `ingest finished` / `ingest failed` and emits one `ingest.completed` custom event — `outcome`
 (`success` · `partial` · `error`), `error_kind` (`none` · `corpus_not_found` · `corpus_empty` · `corpus_too_large` ·
-`corpus_unreadable` · `timeout` · `cancelled` · `dimension_mismatch` · `index_shape` · `not_configured` · `ingest_error` ·
+`corpus_unreadable` · `timeout` · `lock_lost` · `cancelled` · `dimension_mismatch` · `index_shape` · `not_configured` · `ingest_error` ·
 `unexpected`), counts and seconds — never a document's text, a path, or an exception's message. A corpus over
 `INGEST_MAX_FILES` / `INGEST_MAX_BYTES` is refused before anything is embedded.
 

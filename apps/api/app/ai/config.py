@@ -38,6 +38,8 @@ DEFAULT_MAX_CONCURRENT_ASKS = 4
 # model G7). The repository's docs/ is a few dozen files and a few MB.
 DEFAULT_INGEST_MAX_FILES = 1000
 DEFAULT_INGEST_MAX_BYTES = 50 * 1024 * 1024
+# One ingestion run may take this long (a wedged run keeps renewing its lock: it needs a deadline).
+DEFAULT_INGEST_MAX_RUN_SECONDS = 1800.0
 # text-embedding-3-small / ada-002 produce 1536-dimensional vectors; large = 3072.
 DEFAULT_EMBEDDING_DIMENSIONS = 1536
 
@@ -107,6 +109,8 @@ class AISettings:
     # The corpus size cap of an ingestion run (api 3.3): files, and bytes in total.
     ingest_max_files: int = DEFAULT_INGEST_MAX_FILES
     ingest_max_bytes: int = DEFAULT_INGEST_MAX_BYTES
+    # The deadline of one ingestion run started over HTTP (api 5.2).
+    ingest_max_run_seconds: float = DEFAULT_INGEST_MAX_RUN_SECONDS
 
     @property
     def worst_case_seconds(self) -> float:
@@ -199,4 +203,5 @@ def get_ai_settings() -> AISettings:
         ),
         ingest_max_files=_positive_int_env("INGEST_MAX_FILES", DEFAULT_INGEST_MAX_FILES),
         ingest_max_bytes=_positive_int_env("INGEST_MAX_BYTES", DEFAULT_INGEST_MAX_BYTES),
+        ingest_max_run_seconds=_float_env("INGEST_MAX_RUN_SECONDS", DEFAULT_INGEST_MAX_RUN_SECONDS),
     )

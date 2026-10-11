@@ -426,7 +426,7 @@ export interface operations {
           'application/json': components['schemas']['ErrorBody'];
         };
       };
-      /** @description A run is already in progress (`ingest_running`) */
+      /** @description A run is already in progress, here or in another replica (`ingest_running`) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -453,7 +453,7 @@ export interface operations {
           'application/json': components['schemas']['ErrorBody'];
         };
       };
-      /** @description Search or embeddings not configured (`ai_unavailable`) */
+      /** @description Search or embeddings not configured (`ai_unavailable`), or the lock shared by the replicas cannot be taken (`ingest_lock_unavailable`) */
       503: {
         headers: {
           [name: string]: unknown;

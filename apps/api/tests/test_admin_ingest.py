@@ -571,7 +571,7 @@ class TestOutcome:
                 return IngestReport()
 
             monkeypatch.setattr(ingest_job, "ingest_corpus", hangs)
-            ingest_job.start()
+            await ingest_job.start()
             assert ingest_job.is_running()
             await asyncio.sleep(0)
             task = ingest_job._task

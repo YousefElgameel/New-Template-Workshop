@@ -36,10 +36,18 @@ class IngestStarted(BaseModel):
     response_model=IngestStarted,
     summary="Start an ingestion run in the background",
     responses={
-        409: {"model": ErrorBody, "description": "A run is already in progress (`ingest_running`)"},
+        409: {
+            "model": ErrorBody,
+            "description": (
+                "A run is already in progress, here or in another replica (`ingest_running`)"
+            ),
+        },
         503: {
             "model": ErrorBody,
-            "description": "Search or embeddings not configured (`ai_unavailable`)",
+            "description": (
+                "Search or embeddings not configured (`ai_unavailable`), or the lock shared by the "
+                "replicas cannot be taken (`ingest_lock_unavailable`)"
+            ),
         },
     },
 )
@@ -49,5 +57,5 @@ async def start_ingest() -> IngestStarted:
     settings = get_ai_settings()
     settings.require_search()
     settings.require_embeddings()
-    ingest_job.start()
+    await ingest_job.start()
     return IngestStarted()

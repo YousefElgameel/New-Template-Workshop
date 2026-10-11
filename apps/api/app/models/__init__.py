@@ -15,5 +15,6 @@ Adding a model (``.claude/rules/25-sqlalchemy.md``):
 from __future__ import annotations
 
 from app.models.conversation import Conversation, Message
+from app.models.ingest_lock import IngestLock
 
-__all__ = ["Conversation", "Message"]
+__all__ = ["Conversation", "IngestLock", "Message"]

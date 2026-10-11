@@ -18,6 +18,40 @@ The two services version independently.
   text, the model service) and the retention decision (none automatic for now, revisit when auth lands). `pii-purge.md`
   is telemetry only and now says so. `tests/test_runbooks.py` pins the statements to the models.
 
+## [0.17.0] — 2026-10-11
+
+### Added
+
+- **The ingest lock works across replicas** (roadmap api 5.2): `POST /v1/admin/ingest` answers `409 ingest_running` when a
+  run is in progress in **any** replica, not only in this process. The lock is a row in a new table, `ingest_locks`
+  (revision `9c3e5a7d1f42`, **to be applied by the migration pipeline or a named human before the api is deployed with a
+  database**): taken when a run starts, **renewed every 100 s** while it runs, deleted when it ends. A replica that
+  crashes stops renewing, so its lock **expires on its own** after 5 minutes and any replica may take it over. All times
+  are the database's own clock (`SYSUTCDATETIME()`), so a replica's clock cannot matter; the take-over and the first
+  insert are each atomic on one row, so two replicas racing for it cannot both win.
+  - **A run that loses its lock stops**: if a renewal finds the row taken over, or none succeeds for `ttl - heartbeat` (200 s: the
+    database cannot be reached, **before** the row can expire), the run is cancelled and its outcome is `error_kind: lock_lost`.
+    Each renewal has its own time limit, so a hung connection counts as a failed one.
+  - **A run has an overall deadline** (`INGEST_MAX_RUN_SECONDS`, 1800): a wedged run that keeps renewing its lock is stopped
+    (`error_kind: timeout`) and gives the lock back.
+  - **Fails closed:** with `DATABASE_URL` configured, a lock that cannot be taken (the table is missing, the database is
+    unreachable) is `503 ingest_lock_unavailable`, never "go ahead anyway" (every database call has a time limit). With the placeholder
+    `DATABASE_URL` and `APP_ENV=local` the in-process lock alone is used, as before; a **deployed** environment with no database URL is
+    `503` too. The command (`python -m app.ai.ingest`) takes no lock.
+  - `ingest_job.start()` is now `async`; the route awaits it. The OpenAPI description of the `409` and `503` responses and
+    the web's generated types are regenerated.
+- New: `app/models/ingest_lock.py` (`IngestLock`), `app/repositories/ingest_lock.py` (the statements),
+  `app/ai/ingest_lock.py` (`DatabaseIngestLock`, `IngestLockUnavailable`), `tests/test_ingest_lock.py`,
+  `tests/test_migration_ingest_locks.py`.
+
+### Known limits
+
+- The lock is not a fence: a run that is paused for longer than the ttl and then resumes can overlap a run another replica
+  started; it learns at its next renewal (at most 100 s later) and stops. Ingestion is idempotent (stable chunk ids), so an
+  overlap writes the same documents twice, nothing worse.
+- Applying the migration is a human step; until it is applied a deployed api with a database answers `503` to the ingest
+  endpoint (the rest of the api is unaffected).
+
 ## [0.16.0] — 2026-10-09
 
 ### Added
